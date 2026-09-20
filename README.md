@@ -42,23 +42,27 @@ Instead of guessing tokens, Laya resolves structured questions simultaneously:
                                    │
             ┌──────────────────────┴──────────────────────┐
             ▼                                             ▼
-  High Confidence Match                        Compound or Ambiguous
-  (Intent & Target Slots)                      (P(compound) > threshold)
+  High Confidence Match                         Compound or Low Confidence
+  (Intent & Target Slots)                       (P(compound) > thres or Conf < thres)
             │                                             │
             ▼                                             ▼
-  Home Assistant Intent                    System 2 Fallback Agent
-  (intent.async_handle)                    (e.g., Local LLM or Cloud)
+  Home Assistant Intent                         System 2 Fallback Agent
+  (intent.async_handle)                         (e.g., Local LLM or Cloud)
 ```
 
-### Speculative Fan-Out
+### Speculative Fan-Out & Decision Design
 
-Rather than asking questions one-by-one in a slow conversation tree, Laya uses **speculative fan-out** to evaluate everything at once:
+Rather than asking questions one-by-one in a slow conversational cascade, Laya uses **speculative fan-out**—evaluating all candidate questions simultaneously in a single forward pass and performing decision routing in code:
 
 1. **Respects Your Privacy**: It only ever considers devices and areas that you have explicitly enabled under _Expose to Assist_.
-2. **Adapts to Your Home**: It dynamically detects active domains in your home state (such as `light`, `switch`, `climate`, `fan`, `cover`, `vacuum`) so you don't have to manually configure them.
-3. **Instant Number Extraction**: Fast, deterministic regex extractors instantly pull out target percentages and temperatures (e.g. _"set thermostat to 68 degrees"_ $\to$ `68.0`, _"dim lights to 40%"_ $\to$ `40`).
-4. **Keeps Choices Manageable**: Questions are capped at 20 options each (`MAX_OPTIONS_PER_QUESTION = 20`) to keep the decision space optimal and accurate.
-5. **Knows When to Ask for Help**: If you ask something complex like _"turn off the porch light and lock the front door"_, Laya spots that it's a compound command and gracefully hands it off to your configured System 2 fallback agent.
+2. **Dynamic Intent & Slot Discovery**: It introspects Home Assistant's registered `IntentHandler`s to discover candidate intents, validating that required slots (e.g. `name`, `area`, `domain`, `brightness`) can be fulfilled by the strategy before including them in the prompt.
+3. **Semantic Question Formulation**: Following TypeSafe AI design patterns, questions are formulated around physical smart home meaning and context (e.g. _"What action or command is the user asking Home Assistant to perform?"_) rather than mechanical slot handles.
+4. **Closed-Set Candidates (No Artificial Fallback Trap)**: Rather than adding an artificial `"other: None of the above"` choice that steals 30–40% of probability mass from valid commands, questions are strictly closed-set over registered intents and entities. Out-of-domain requests or small talk naturally produce diffuse, uncertain probability distributions that trigger escalation.
+5. **Calibrated Confidence Metric**: Softmax probability $p$ is misleading when the number of choices $N$ varies. Laya calibrates Choice confidence using the dispersion formula:
+   $$\text{confidence} = \max\left(0, \min\left(1, \frac{N \times p_{\max} - 1}{N - 1}\right)\right)$$
+   Uniform uncertainty ($p_{\max} = 1/N$) maps to `0.0` confidence, while complete certainty ($p_{\max} = 1.0$) maps to `1.0`. A dominant choice among 4 or 10 candidates is never penalized by softmax dilution.
+6. **Instant Numeric Extraction**: Deterministic extractors instantly pull out target percentages and temperatures (e.g. _"set thermostat to 68 degrees"_ $\to$ `68.0`, _"dim lights to 40%"_ $\to$ `40`).
+7. **Knows When to Ask for Help**: If you ask something complex like _"turn off the porch light and lock the front door"_, Laya detects the compound instruction ($P(\text{compound}) > \text{threshold}$) or diffuse confidence and cleanly hands it off to your configured System 2 fallback agent.
 
 ---
 
@@ -66,13 +70,13 @@ Rather than asking questions one-by-one in a slow conversation tree, Laya uses *
 
 You can configure Laya directly in the Home Assistant UI or programmatically via config entry data:
 
-| Field                  | Location           | Type    | Default  | Description                                                                              |
-| :--------------------- | :----------------- | :------ | :------- | :--------------------------------------------------------------------------------------- |
-| `device`               | `data`             | `str`   | `"auto"` | Hardware device: `"auto"`, `"cuda"`, `"mps"`, or `"cpu"`.                                |
-| `idle_timeout`         | `data` / `options` | `float` | `0.0`    | Seconds to hold model weights in RAM after a query. `0.0` unloads immediately when idle. |
-| `compound_threshold`   | `options`          | `float` | `0.65`   | Probability threshold where commands are flagged as compound and escalated.              |
-| `confidence_threshold` | `options`          | `float` | `0.50`   | Minimum confidence score needed to execute an intent directly.                           |
-| `fallback_agent`       | `options`          | `str`   | `None`   | Entity or agent ID for System 2 fallback (e.g. `"conversation.home_assistant"`).         |
+| Field                  | Location           | Type    | Default  | Description                                                                                   |
+| :--------------------- | :----------------- | :------ | :------- | :-------------------------------------------------------------------------------------------- |
+| `device`               | `data`             | `str`   | `"auto"` | Hardware device: `"auto"`, `"cuda"`, `"mps"`, or `"cpu"`.                                     |
+| `idle_timeout`         | `data` / `options` | `float` | `0.0`    | Seconds to hold model weights in RAM after a query. `0.0` unloads immediately when idle.      |
+| `compound_threshold`   | `options`          | `float` | `0.65`   | Probability threshold where commands are flagged as compound and escalated.                   |
+| `confidence_threshold` | `options`          | `float` | `0.30`   | Minimum calibrated confidence score ($\frac{N \cdot p_{\max} - 1}{N - 1}$) needed to execute. |
+| `fallback_agent`       | `options`          | `str`   | `None`   | Entity or agent ID for System 2 fallback (e.g. `"conversation.home_assistant"`).              |
 
 ---
 
@@ -85,7 +89,7 @@ Model weights take about ~1.2 GB of RAM:
 - **For everyday home use (`idle_timeout = 0.0`)**: If you run Home Assistant on a Raspberry Pi or shared server, you probably don't want 1.2 GB of memory tied up all day. By default, Laya unloads its weights immediately after answering your request, freeing up RAM.
 - **For running evals and benchmarks (`idle_timeout > 0`)**: If you are benchmarking 100 test sentences in a script, you don't want to wait 20–30 seconds for the model to reload on every single sentence. Setting `idle_timeout: 60.0`:
   1. **Preloads the model** into memory during setup (`async_setup_entry`).
-  2. **Keeps the model warm** between requests, letting you evaluate at full ~200ms speed.
+  2. **Keeps the model warm** between requests in an internal model pool, letting you evaluate at full ~200ms speed.
 
 ### Programmatic Setup in Tests & Benchmark Scripts
 
@@ -117,7 +121,7 @@ async def setup_laya_for_eval(hass: HomeAssistant) -> MockConfigEntry:
         options={
             CONF_IDLE_TIMEOUT: 60.0,
             CONF_COMPOUND_THRESHOLD: 0.65,
-            CONF_CONFIDENCE_THRESHOLD: 0.50,
+            CONF_CONFIDENCE_THRESHOLD: 0.30,
             CONF_FALLBACK_AGENT: "conversation.home_assistant",
         },
     )
