@@ -16,10 +16,8 @@ from ..models import (
 )
 from .base import Decision, DecisionStrategy, StrategyContext
 from .discovery import (
-    CANONICAL_INTENT_DESCRIPTIONS,
-    INFORMATIONAL_INTENTS,
     ONOFF_DOMAINS,
-    can_fulfill_intent,
+    discover_intents,
     get_allowed_domains_for_intents,
     lexical_score,
     tokenize,
@@ -57,62 +55,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         self, context: StrategyContext, utterance: str
     ) -> dict[str, str]:
         """Discover and rank candidate intent schemas."""
-        query_tokens = tokenize(utterance)
-        registered_handlers: list[intent.IntentHandler] = []
-        if context.hass:
-            try:
-                registered_handlers = list(intent.async_get(context.hass))
-            except Exception:
-                registered_handlers = []
-
-        scored_intents: list[tuple[float, str, str]] = []
-
-        for handler in registered_handlers:
-            intent_type = getattr(handler, "intent_type", None)
-            if (
-                not intent_type
-                or intent_type in INFORMATIONAL_INTENTS
-                or not can_fulfill_intent(handler)
-            ):
-                continue
-            desc = getattr(
-                handler, "description", ""
-            ) or CANONICAL_INTENT_DESCRIPTIONS.get(intent_type, intent_type)
-            name_readable = intent_type.replace("Hass", " ")
-            score = lexical_score(query_tokens, desc, utterance) + lexical_score(
-                query_tokens, name_readable, utterance
-            )
-            scored_intents.append((score, intent_type, desc))
-
-        # Fallback to defaults if no registered handlers exist
-        if not scored_intents:
-            for itype, desc in CANONICAL_INTENT_DESCRIPTIONS.items():
-                if itype in INFORMATIONAL_INTENTS:
-                    continue
-                name_readable = itype.replace("Hass", " ")
-                score = lexical_score(query_tokens, desc, utterance) + lexical_score(
-                    query_tokens, name_readable, utterance
-                )
-                scored_intents.append((score, itype, desc))
-
-        scored_intents.sort(key=lambda x: x[0], reverse=True)
-
-        positive_intents = [item for item in scored_intents if item[0] > 0.0]
-        intents_to_consider = positive_intents if positive_intents else scored_intents
-
-        criteria: dict[str, str] = {}
-        for _, itype, desc in intents_to_consider[:5]:
-            criteria[itype] = desc
-
-        if not positive_intents:
-            for itype in ("HassTurnOn", "HassTurnOff"):
-                if itype not in criteria and len(criteria) < 5:
-                    criteria[itype] = CANONICAL_INTENT_DESCRIPTIONS.get(
-                        itype, f"Handle {itype.replace('Hass', '')}"
-                    )
-
-        criteria["unmatched"] = "Not a home control request or unsupported intent"
-        return criteria
+        return discover_intents(context, utterance, max_options=5)
 
     def _rank_entities(
         self,
@@ -435,12 +378,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         handlers_map: dict[str, intent.IntentHandler] = {}
         if context.hass:
-            try:
-                handlers_map = {
-                    h.intent_type: h for h in intent.async_get(context.hass)
-                }
-            except Exception:
-                handlers_map = {}
+            handlers_map = {h.intent_type: h for h in intent.async_get(context.hass)}
 
         candidate_intent_types = [k for k in intent_criteria.keys() if k != "unmatched"]
         allowed_domains = get_allowed_domains_for_intents(

@@ -96,21 +96,14 @@ SUPPORTED_STRATEGY_SLOTS: frozenset[str] = frozenset(
     {"name", "area", "domain", "floor", "device_class", "brightness", "temperature"}
 )
 
-CANONICAL_INTENT_DESCRIPTIONS: dict[str, str] = {
-    "HassTurnOn": "Turn on or activate a device, light, or appliance",
-    "HassTurnOff": "Turn off or deactivate a device, light, or appliance",
-    "HassToggle": "Toggle a device on or off",
-    "HassLightSet": "Set brightness, dim, or change color of lights",
-    "HassClimateSetTemperature": "Set target temperature for thermostat or climate device",
-    "HassMediaPause": "Pause media playback, music, or speaker",
-    "HassMediaUnpause": "Resume or unpause media playback, music, or speaker",
-    "HassMediaNextTrack": "Skip to next song or track on media player",
-    "HassMediaPreviousTrack": "Go to previous song or track on media player",
-    "HassSetVolume": "Set volume level of a speaker or media player",
-    "HassOpenCover": "Open a garage door, cover, blinds, or shades",
-    "HassCloseCover": "Close a garage door, cover, blinds, or shades",
-    "HassStopMoving": "Stop movement of a garage door, cover, or shades",
-}
+
+def get_intent_description(handler: intent.IntentHandler) -> str:
+    """Extract a human-readable description from an intent handler."""
+    desc = getattr(handler, "description", None) or handler.__doc__
+    if desc:
+        return desc.strip()
+    intent_type = getattr(handler, "intent_type", "")
+    return f"Handle {intent_type.replace('Hass', '').strip()}"
 
 
 def tokenize(text: str) -> set[str]:
@@ -197,60 +190,61 @@ def can_fulfill_intent(handler: intent.IntentHandler) -> bool:
 def discover_intents(
     context: StrategyContext,
     utterance: str,
-    max_options: int = 15,
+    max_options: int = 5,
 ) -> dict[str, str]:
     """Discover candidate intents matching the user utterance."""
     query_tokens = tokenize(utterance)
-    full_query = utterance.lower()
 
-    scored_candidates: list[tuple[float, str, str]] = []
-    registered_handlers = intent.async_get(context.hass) if context.hass else []
+    registered_handlers: list[intent.IntentHandler] = []
+    if context.hass:
+        registered_handlers = list(intent.async_get(context.hass))
 
-    if registered_handlers:
-        for handler in registered_handlers:
-            intent_type = handler.intent_type
-            if intent_type in INFORMATIONAL_INTENTS or not can_fulfill_intent(handler):
-                continue
+    scored_intents: list[tuple[float, str, str]] = []
 
-            desc = CANONICAL_INTENT_DESCRIPTIONS.get(intent_type)
-            if not desc:
-                raw_desc = (
-                    getattr(handler, "description", None)
-                    or handler.__doc__
-                    or f"Handle {intent_type.replace('Hass', '').strip()}"
+    for handler in registered_handlers:
+        intent_type = getattr(handler, "intent_type", None)
+        if (
+            not intent_type
+            or intent_type in INFORMATIONAL_INTENTS
+            or not can_fulfill_intent(handler)
+        ):
+            continue
+
+        desc = get_intent_description(handler)
+        name_readable = intent_type.replace("Hass", " ")
+        score = lexical_score(query_tokens, desc, utterance) + lexical_score(
+            query_tokens, name_readable, utterance
+        )
+        scored_intents.append((score, intent_type, desc))
+
+    scored_intents.sort(key=lambda x: x[0], reverse=True)
+
+    positive_intents = [item for item in scored_intents if item[0] > 0.0]
+    intents_to_consider = positive_intents if positive_intents else scored_intents
+
+    criteria: dict[str, str] = {}
+    for _, itype, desc in intents_to_consider[:max_options]:
+        criteria[itype] = desc
+
+    if not positive_intents:
+        for itype in ("HassTurnOn", "HassTurnOff"):
+            if itype not in criteria and len(criteria) < max_options:
+                handler = next(
+                    (
+                        h
+                        for h in registered_handlers
+                        if getattr(h, "intent_type", None) == itype
+                    ),
+                    None,
                 )
-                desc = raw_desc.split(". ")[0].strip()
-                if not desc.endswith("."):
-                    desc += "."
+                desc = (
+                    get_intent_description(handler)
+                    if handler
+                    else f"Handle {itype.replace('Hass', '').strip()}"
+                )
+                criteria[itype] = desc
 
-            desc_score = lexical_score(query_tokens, desc, full_query)
-            name_score = lexical_score(
-                query_tokens, intent_type.replace("Hass", " "), full_query
-            )
-            score = desc_score + name_score
-            scored_candidates.append((score, intent_type, desc))
-    else:
-        for it, desc in CANONICAL_INTENT_DESCRIPTIONS.items():
-            desc_score = lexical_score(query_tokens, desc, full_query)
-            name_score = lexical_score(
-                query_tokens, it.replace("Hass", " "), full_query
-            )
-            score = desc_score + name_score
-            scored_candidates.append((score, it, desc))
-
-    scored_candidates.sort(key=lambda x: x[0], reverse=True)
-
-    positive_candidates = [c for c in scored_candidates if c[0] > 0]
-    selected = (
-        positive_candidates[:max_options]
-        if positive_candidates
-        else scored_candidates[:max_options]
-    )
-
-    criteria = {name: desc for _, name, desc in selected}
-    criteria["unmatched"] = (
-        "The request does not match any available Home Assistant action"
-    )
+    criteria["unmatched"] = "Not a home control request or unsupported intent"
     return criteria
 
 

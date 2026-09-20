@@ -2,7 +2,6 @@
 
 from .base import Decision, DecisionStrategy, StrategyContext
 from .discovery import (
-    CANONICAL_INTENT_DESCRIPTIONS,
     CONTROLLABLE_DOMAINS,
     INFORMATIONAL_INTENTS,
     ONOFF_DOMAINS,
@@ -11,6 +10,7 @@ from .discovery import (
     discover_intents,
     get_allowed_domains_for_intents,
     get_handler_slot_info,
+    get_intent_description,
     lexical_score,
     rank_areas,
     rank_entities,
@@ -20,7 +20,6 @@ from .discovery import (
 from .speculative import SpeculativeFanOutStrategy
 
 __all__ = [
-    "CANONICAL_INTENT_DESCRIPTIONS",
     "CONTROLLABLE_DOMAINS",
     "Decision",
     "DecisionStrategy",
@@ -33,6 +32,7 @@ __all__ = [
     "discover_intents",
     "get_allowed_domains_for_intents",
     "get_handler_slot_info",
+    "get_intent_description",
     "lexical_score",
     "rank_areas",
     "rank_entities",
