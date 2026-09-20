@@ -1,62 +1,82 @@
-"""Tests for the config flow."""
-
-from unittest.mock import patch
-
+"""Test the Laya config flow."""
 
 from homeassistant import config_entries
-from homeassistant.const import (
-    CONF_DEVICE_ID,
-)
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import device_registry as dr
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.laya.const import DOMAIN
+from custom_components.laya.const import (
+    CONF_COMPOUND_THRESHOLD,
+    CONF_CONFIDENCE_THRESHOLD,
+    CONF_DEVICE,
+    CONF_FALLBACK_AGENT,
+    DOMAIN,
+)
 
 
-async def test_select_device(
-    hass: HomeAssistant,
-    zwave_device_id: str,
-) -> None:
-    """Test selecting a device in the configuration flow."""
-    # Create a mock zwave_js config entry to link the device to
-    zwave_entry = MockConfigEntry(
-        domain="zwave_js",
-        data={},
-    )
-    zwave_entry.add_to_hass(hass)
-
-    # Create a device in the registry so that it can be found by config_flow
-    device_registry = dr.async_get(hass)
-    device_entry = device_registry.async_get_or_create(
-        config_entry_id=zwave_entry.entry_id,
-        identifiers={("zwave_js", zwave_device_id)},
-        name="Device name",
-    )
-
+async def test_user_step_creates_entry(hass: HomeAssistant) -> None:
+    """Test user step creates a local Laya entry."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result.get("type") is FlowResultType.FORM
-    assert result.get("errors") is None
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
 
-    with patch(
-        f"custom_components.{DOMAIN}.async_setup_entry", return_value=True
-    ) as mock_setup:
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_DEVICE_ID: device_entry.id,
-            },
-        )
-        await hass.async_block_till_done()
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_DEVICE: "cpu"},
+    )
+    assert result2["type"] is FlowResultType.CREATE_ENTRY
+    assert result2["title"] == "Laya"
+    assert result2["data"][CONF_DEVICE] == "cpu"
 
-    assert result.get("type") is FlowResultType.CREATE_ENTRY
-    assert result.get("title") == "Device name"
-    assert result.get("data") == {}
-    assert result.get("options") == {
-        CONF_DEVICE_ID: device_entry.id,
-    }
-    assert len(mock_setup.mock_calls) == 1
+
+async def test_options_flow_thresholds(hass: HomeAssistant) -> None:
+    """Test options flow to configure decision thresholds."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DEVICE: "cpu"},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_COMPOUND_THRESHOLD: 0.85,
+            CONF_CONFIDENCE_THRESHOLD: 0.60,
+        },
+    )
+    assert result2["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_COMPOUND_THRESHOLD] == 0.85
+    assert entry.options[CONF_CONFIDENCE_THRESHOLD] == 0.60
+
+
+async def test_options_flow_fallback_agent(hass: HomeAssistant) -> None:
+    """Test options flow to configure System 2 fallback conversation agent."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DEVICE: "cpu"},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_FALLBACK_AGENT: "conversation.home_assistant",
+        },
+    )
+    assert result2["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FALLBACK_AGENT] == "conversation.home_assistant"

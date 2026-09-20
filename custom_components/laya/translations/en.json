@@ -1,3 +1,26 @@
 {
-  "title": "Laya"
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Laya",
+        "description": "Set up Laya System 1 decision engine for Home Assistant Assist.",
+        "data": {
+          "device": "Computation Device"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Laya Options",
+        "description": "Configure decision thresholds and System 2 fallback agent.",
+        "data": {
+          "compound_threshold": "Compound Utterance Threshold (P > threshold triggers System 2)",
+          "confidence_threshold": "Minimum Confidence Threshold",
+          "fallback_agent": "System 2 Fallback Conversation Agent"
+        }
+      }
+    }
+  }
 }

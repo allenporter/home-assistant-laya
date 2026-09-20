@@ -2,53 +2,111 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
-
 import voluptuous as vol
 
-from homeassistant.const import CONF_DEVICE_ID
-from homeassistant.helpers import device_registry as dr, selector
-from homeassistant.helpers.schema_config_entry_flow import (
-    SchemaConfigFlowHandler,
-    SchemaFlowFormStep,
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import callback
+from homeassistant.helpers import selector
+
+from .const import (
+    CONF_COMPOUND_THRESHOLD,
+    CONF_CONFIDENCE_THRESHOLD,
+    CONF_DEVICE,
+    CONF_FALLBACK_AGENT,
+    DEFAULT_COMPOUND_THRESHOLD,
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_DEVICE,
+    DOMAIN,
 )
 
-from .const import DOMAIN
 
+class LayaConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Laya."""
 
-CONFIG_FLOW = {
-    "user": SchemaFlowFormStep(
-        vol.Schema(
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the initial step."""
+        if user_input is not None:
+            return self.async_create_entry(title="Laya", data=user_input)
+
+        schema = vol.Schema(
             {
-                vol.Required(CONF_DEVICE_ID): selector.DeviceSelector(
-                    selector.DeviceSelectorConfig(integration="zwave_js")
+                vol.Optional(
+                    CONF_DEVICE, default=DEFAULT_DEVICE
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["auto", "cpu", "cuda", "mps"],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 ),
             }
         )
-    )
-}
 
-OPTIONS_FLOW = {
-    "init": SchemaFlowFormStep(),
-}
+        return self.async_show_form(step_id="user", data_schema=schema)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Create the options flow."""
+        return LayaOptionsFlowHandler()
 
 
-class LayaConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
-    """Handle a config flow for Switch as X."""
+class LayaOptionsFlowHandler(OptionsFlow):
+    """Handle options for Laya."""
 
-    config_flow = CONFIG_FLOW
-    options_flow = OPTIONS_FLOW
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
 
-    VERSION = 1
-    MINOR_VERSION = 1
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_COMPOUND_THRESHOLD,
+                    default=self.config_entry.options.get(
+                        CONF_COMPOUND_THRESHOLD, DEFAULT_COMPOUND_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=1.0,
+                        step=0.05,
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_CONFIDENCE_THRESHOLD,
+                    default=self.config_entry.options.get(
+                        CONF_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=1.0,
+                        step=0.05,
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_FALLBACK_AGENT,
+                    description={
+                        "suggested_value": self.config_entry.options.get(
+                            CONF_FALLBACK_AGENT
+                        )
+                    },
+                ): selector.ConversationAgentSelector(),
+            }
+        )
 
-    def async_config_entry_title(self, options: Mapping[str, Any]) -> str:
-        """Return config entry title."""
-        registry = dr.async_get(self.hass)
-        device_entry = registry.async_get(options[CONF_DEVICE_ID])
-        if device_entry is not None:
-            title = device_entry.name_by_user or device_entry.name
-            if title is not None:
-                return title
-        return "Unknown Device"
+        return self.async_show_form(step_id="init", data_schema=schema)
