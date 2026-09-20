@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# script/download-model: Pre-download Laya model weights from Hugging Face
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+echo "==> Downloading Laya model weights..."
+
+if command -v uv >/dev/null 2>&1; then
+  uv run python -c "import laya; laya.load(device='cpu')"
+else
+  python3 -c "import laya; laya.load(device='cpu')"
+fi
+
+echo "==> Model weights downloaded and cached successfully!"

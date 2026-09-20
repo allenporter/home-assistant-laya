@@ -104,10 +104,9 @@ async def test_local_engine_zero_idle_timeout_unloads_immediately(
 
 @pytest.mark.slow
 async def test_live_local_engine_turn_on_light(
-    monkeypatch: pytest.MonkeyPatch,
+    require_laya_model: None,
 ) -> None:
     """Live inference test verifying real Laya weights predict turn on light."""
-    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     engine = LocalLayaEngine(device="cpu", idle_timeout=10.0)
     questions = {
         "intent": ChoiceQuestion(

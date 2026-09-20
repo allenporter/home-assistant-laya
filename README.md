@@ -129,22 +129,6 @@ async def setup_laya_for_eval(hass: HomeAssistant) -> MockConfigEntry:
 
 ---
 
-## Contributing & Development
+## Contributing
 
-### Setup Environment
-
-```bash
-$ script/setup
-```
-
-### Running Tests
-
-```bash
-$ script/test
-```
-
-### Running Linters
-
-```bash
-$ script/lint
-```
+For instructions on setting up your development environment, downloading model weights, running the test suite, and linting, see [CONTRIBUTING.md](CONTRIBUTING.md).
