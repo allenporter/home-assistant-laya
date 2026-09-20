@@ -1,16 +1,16 @@
 """Tests for speculative fan-out decision strategy."""
 
 from homeassistant.core import HomeAssistant, State
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import area_registry as ar, entity_registry as er, intent
 
 from custom_components.laya.const import MAX_OPTIONS_PER_QUESTION
 from custom_components.laya.engine import (
     ChoiceAnswer,
     FakeDecisionEngine,
     NoulAnswer,
-    ScoreAnswer,
 )
 from custom_components.laya.strategy import SpeculativeFanOutStrategy, StrategyContext
+from tests.common.fixture_loader import DummyIntentHandler
 
 
 async def test_speculative_fan_out_area_turn_on(hass: HomeAssistant) -> None:
@@ -84,10 +84,73 @@ async def test_speculative_fan_out_entity_turn_off(hass: HomeAssistant) -> None:
     assert "target_entity" in decision.active_keys
 
 
-async def test_speculative_fan_out_climate_numeric_extraction(
+async def test_speculative_fan_out_prunes_unsupported_area_slot(
     hass: HomeAssistant,
 ) -> None:
-    """Test routing and deterministic numeric extraction for climate setpoint."""
+    """Test that target_area is omitted when candidate intents do not support area targeting."""
+    intent.async_register(
+        hass,
+        DummyIntentHandler(
+            "CustomDeviceCalibrate",
+            description="Performs an entity-specific calibrate on a device",
+            platforms={"light"},
+            supported_slots={"name"},
+        ),
+    )
+
+    area_reg = ar.async_get(hass)
+    area_reg.async_get_or_create("living_room")
+
+    entity_reg = er.async_get(hass)
+    context = StrategyContext(
+        hass=hass,
+        area_registry=area_reg,
+        entity_registry=entity_reg,
+        states=[State("light.desk_lamp", "on", {"friendly_name": "Desk Lamp"})],
+    )
+
+    engine = FakeDecisionEngine(
+        default_answers={
+            "intent": ChoiceAnswer(choice="CustomDeviceCalibrate", confidence=0.95),
+            "target_entity": ChoiceAnswer(choice="light.desk_lamp", confidence=0.96),
+            "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
+        }
+    )
+
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(engine, "Calibrate the desk lamp", context)
+
+    assert len(engine.calls) == 1
+    questions = engine.calls[0]["questions"]
+
+    # Since CustomDeviceCalibrate only supports 'name', 'target_area' and 'target_domain' must be pruned!
+    assert "target_area" not in questions
+    assert "target_domain" not in questions
+    # And target_type is omitted since only 1 target scope ('entity') is possible
+    assert "target_type" not in questions
+    assert "target_entity" in questions
+
+    assert not decision.should_escalate
+    assert decision.intent_name == "CustomDeviceCalibrate"
+    assert decision.slots == {"entity_id": "light.desk_lamp"}
+    assert "target_entity" in decision.active_keys
+
+
+async def test_speculative_fan_out_filters_unfulfillable_required_slots(
+    hass: HomeAssistant,
+) -> None:
+    """Test that intents requiring slots we cannot fulfill are filtered out."""
+    intent.async_register(
+        hass,
+        DummyIntentHandler(
+            "HassClimateSetTemperature",
+            description="Sets thermostat target temperature in degrees",
+            platforms={"climate"},
+            supported_slots={"name", "area", "temperature"},
+            required_slots={"temperature"},
+        ),
+    )
+
     area_reg = ar.async_get(hass)
     entity_reg = er.async_get(hass)
     context = StrategyContext(
@@ -96,36 +159,22 @@ async def test_speculative_fan_out_climate_numeric_extraction(
         entity_registry=entity_reg,
         states=[
             State(
-                "climate.living_room_thermostat",
+                "climate.thermostat",
                 "heat",
                 {"friendly_name": "Thermostat"},
             )
         ],
     )
 
-    engine = FakeDecisionEngine(
-        default_answers={
-            "intent": ChoiceAnswer(choice="HassClimateSetTemperature", confidence=0.94),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.88),
-            "target_domain": ChoiceAnswer(choice="climate", confidence=0.97),
-            "target_entity": ChoiceAnswer(
-                choice="climate.living_room_thermostat", confidence=0.95
-            ),
-            "target_temperature": ScoreAnswer(score=2.0, confidence=0.91),
-            "is_compound": NoulAnswer(noul=0.05, confidence=0.95),
-        }
-    )
-
+    engine = FakeDecisionEngine()
     strategy = SpeculativeFanOutStrategy()
-    decision = await strategy.async_decide(
-        engine, "Set the living room thermostat to 65 degrees", context
-    )
 
-    assert not decision.should_escalate
-    assert decision.intent_name == "HassClimateSetTemperature"
-    assert decision.slots["entity_id"] == "climate.living_room_thermostat"
-    assert decision.slots["temperature"] == 65.0
-    assert decision.slots["temperature_level"] == 2.0
+    await strategy.async_decide(engine, "Set thermostat to 72 degrees", context)
+
+    assert len(engine.calls) == 1
+    questions = engine.calls[0]["questions"]
+    # The intent requiring temperature must NOT be in the intent criteria
+    assert "HassClimateSetTemperature" not in questions["intent"].criteria
 
 
 async def test_speculative_fan_out_brightness_numeric_extraction(
