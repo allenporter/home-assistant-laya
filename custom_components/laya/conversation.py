@@ -7,10 +7,7 @@ from typing import Any, Literal
 from typing_extensions import override
 
 from homeassistant.components import conversation
-from homeassistant.components.homeassistant.exposed_entities import (
-    DATA_EXPOSED_ENTITIES,
-    async_should_expose,
-)
+from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import (
@@ -89,15 +86,11 @@ class LayaConversationEntity(
 
         # Filter entities exposed to Home Assistant Assist
         all_states = self.hass.states.async_all()
-        if DATA_EXPOSED_ENTITIES in self.hass.data:
-            exposed_states = [
-                state
-                for state in all_states
-                if async_should_expose(self.hass, conversation.DOMAIN, state.entity_id)
-            ]
-        else:
-            exposed_states = []
-
+        exposed_states = [
+            state
+            for state in all_states
+            if async_should_expose(self.hass, conversation.DOMAIN, state.entity_id)
+        ]
         active_states = exposed_states if exposed_states else all_states
 
         context = StrategyContext(
