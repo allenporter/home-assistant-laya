@@ -2,41 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 import pytest
-from homeassistant.core import HomeAssistant
 
 from custom_components.laya.engine import LocalLayaEngine
-from custom_components.laya.speculative import SpeculativeFanOutStrategy
-from tests.common.fixture_loader import load_synthetic_home_fixtures
+from custom_components.laya.speculative import DecisionStrategy, StrategyContext
 
 pytestmark = pytest.mark.slow
 
 
-@pytest.fixture(name="farmhouse_context")
-def farmhouse_context_fixture(hass: HomeAssistant):
-    """Load the full family farmhouse fixture context."""
-    return load_synthetic_home_fixtures(hass)
-
-
-@pytest.fixture(scope="module", name="live_engine")
-async def live_engine_fixture() -> AsyncGenerator[LocalLayaEngine, None]:
-    """Provide a warm LocalLayaEngine instance across test cases in this module."""
-    engine = LocalLayaEngine(device="cpu", idle_timeout=None)
-    try:
-        await engine.async_load()
-        yield engine
-    finally:
-        await engine.async_unload(force=True)
-
-
 async def test_live_farmhouse_turn_on_kitchen_light(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: turn on light command routes to kitchen light entity or area."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Turn on the Kitchen Light", farmhouse_context
     )
@@ -56,12 +35,11 @@ async def test_live_farmhouse_turn_on_kitchen_light(
 
 
 async def test_live_farmhouse_turn_off_porch_light(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: turn off light command routes to porch light."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Turn off the Porch Light", farmhouse_context
     )
@@ -81,12 +59,11 @@ async def test_live_farmhouse_turn_off_porch_light(
 
 
 async def test_live_farmhouse_dim_kitchen_light(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: brightness percentage slot extracted alongside device targeting."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Set the Kitchen Light to 50% brightness", farmhouse_context
     )
@@ -101,12 +78,11 @@ async def test_live_farmhouse_dim_kitchen_light(
 
 
 async def test_live_farmhouse_compound_escalation(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: multi-action compound command triggers escalation."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine,
         "Turn on the kitchen light and turn off the porch light",
@@ -118,12 +94,11 @@ async def test_live_farmhouse_compound_escalation(
 
 
 async def test_live_farmhouse_out_of_domain_escalation(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: general conversational query not matching home control escalates."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "What is the capital of France?", farmhouse_context
     )
@@ -132,12 +107,11 @@ async def test_live_farmhouse_out_of_domain_escalation(
 
 
 async def test_live_farmhouse_valve_turn_on(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: turn on sprinklers command routes to backyard sprinkler valve."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Turn on the backyard sprinklers", farmhouse_context
     )
@@ -157,12 +131,11 @@ async def test_live_farmhouse_valve_turn_on(
 
 
 async def test_live_farmhouse_media_player_pause(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: pause command routes to family room speaker."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Pause the family room speaker", farmhouse_context
     )
@@ -181,12 +154,11 @@ async def test_live_farmhouse_media_player_pause(
 
 
 async def test_live_farmhouse_cover_open(
-    farmhouse_context,
+    farmhouse_context: StrategyContext,
     live_engine: LocalLayaEngine,
-    require_laya_model: None,
+    strategy: DecisionStrategy,
 ) -> None:
     """Live inference test: open garage door command routes to barn garage door cover."""
-    strategy = SpeculativeFanOutStrategy()
     decision = await strategy.async_decide(
         live_engine, "Open the barn garage door", farmhouse_context
     )

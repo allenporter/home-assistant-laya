@@ -2,25 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-from homeassistant.core import HomeAssistant
-
 from custom_components.laya.speculative import (
     ChoiceAnswer,
     NoulAnswer,
     SpeculativeFanOutStrategy,
 )
 from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
-from tests.common.fixture_loader import (
-    load_device_action_cases,
-    load_synthetic_home_fixtures,
-)
-
-
-@pytest.fixture(name="farmhouse_context")
-def farmhouse_context_fixture(hass: HomeAssistant):
-    """Load the full family farmhouse fixture context."""
-    return load_synthetic_home_fixtures(hass)
+from tests.common.fixture_loader import load_device_action_cases
 
 
 async def test_farmhouse_context_loaded(farmhouse_context) -> None:

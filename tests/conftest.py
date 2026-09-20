@@ -2,12 +2,9 @@
 
 from collections.abc import AsyncGenerator, Callable, Generator
 import logging
-import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from huggingface_hub import snapshot_download
-import huggingface_hub.constants as hf_constants
 import pytest
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -26,6 +23,11 @@ from custom_components.laya.engine import (
 from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
 
 _LOGGER = logging.getLogger(__name__)
+
+pytest_plugins = [
+    "tests.eval.fixtures_standard",
+    "tests.eval.fixtures_laya",
+]
 
 
 @pytest.fixture(autouse=True)
@@ -93,20 +95,6 @@ async def create_local_engine_fixture(
     for engine in engines:
         await engine.async_unload(force=True)
     await async_unload_all_models()
-
-
-@pytest.fixture(scope="session", name="require_laya_model")
-def require_laya_model_fixture() -> None:
-    """Ensure Laya model weights are cached locally for live tests."""
-    hf_constants.HF_HUB_OFFLINE = True
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    try:
-        snapshot_download("convaiinnovations/laya", local_files_only=True)
-    except Exception as err:
-        pytest.fail(
-            f"Laya model weights not found in local cache ({err}). "
-            "Run './script/download-model' first."
-        )
 
 
 @pytest.fixture(autouse=True)
