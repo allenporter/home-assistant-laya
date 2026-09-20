@@ -193,26 +193,21 @@ async def test_speculative_fan_out_compound_escalation(hass: HomeAssistant) -> N
     assert decision.escalation_reason == "Compound command detected"
 
 
-async def test_dynamic_domains_and_cardinality(hass: HomeAssistant) -> None:
-    """Test dynamic domain detection and cardinality limit enforcement (<= 20 options)."""
-    area_reg = ar.async_get(hass)
-    for i in range(35):
-        area_reg.async_get_or_create(f"room_{i}")
-
+async def test_speculative_fan_out_dynamic_domain_discovery(
+    hass: HomeAssistant,
+) -> None:
+    """Test dynamic domain detection discovers all entity domains in state."""
     states = [
         State("fan.bedroom_fan", "off", {"friendly_name": "Bedroom Fan"}),
         State("vacuum.robot_cleaner", "docked", {"friendly_name": "Robot Cleaner"}),
         State("cover.garage_door", "closed", {"friendly_name": "Garage Door"}),
-    ] + [
-        State(f"light.light_{i}", "off", {"friendly_name": f"Light {i}"})
-        for i in range(35)
+        State("light.ceiling", "off", {"friendly_name": "Ceiling Light"}),
     ]
 
-    entity_reg = er.async_get(hass)
     context = StrategyContext(
         hass=hass,
-        area_registry=area_reg,
-        entity_registry=entity_reg,
+        area_registry=ar.async_get(hass),
+        entity_registry=er.async_get(hass),
         states=states,
     )
 
@@ -222,24 +217,43 @@ async def test_dynamic_domains_and_cardinality(hass: HomeAssistant) -> None:
 
     assert len(engine.calls) == 1
     questions = engine.calls[0]["questions"]
-
-    # Check dynamic domains include discovered domains
     target_domain_q = questions["target_domain"]
-    criteria = (
-        target_domain_q.criteria
-        if hasattr(target_domain_q, "criteria")
-        else target_domain_q["criteria"]
-    )
+    criteria = target_domain_q.criteria
     assert "fan" in criteria
     assert "vacuum" in criteria
     assert "cover" in criteria
     assert "light" in criteria
 
-    # Check cardinality budget <= 20
+
+async def test_speculative_fan_out_cardinality_limit_enforcement(
+    hass: HomeAssistant,
+) -> None:
+    """Test cardinality limit enforcement ensures options do not exceed budget."""
+    area_reg = ar.async_get(hass)
+    for i in range(35):
+        area_reg.async_get_or_create(f"room_{i}")
+
+    states = [
+        State(f"light.light_{i}", "off", {"friendly_name": f"Light {i}"})
+        for i in range(35)
+    ]
+
+    context = StrategyContext(
+        hass=hass,
+        area_registry=area_reg,
+        entity_registry=er.async_get(hass),
+        states=states,
+    )
+
+    engine = FakeDecisionEngine()
+    strategy = SpeculativeFanOutStrategy()
+    await strategy.async_decide(engine, "Turn on lights", context)
+
+    assert len(engine.calls) == 1
+    questions = engine.calls[0]["questions"]
+
     area_q = questions["target_area"]
-    area_crit = area_q.criteria if hasattr(area_q, "criteria") else area_q["criteria"]
-    assert len(area_crit) <= MAX_OPTIONS_PER_QUESTION
+    assert len(area_q.criteria) <= MAX_OPTIONS_PER_QUESTION
 
     ent_q = questions["target_entity"]
-    ent_crit = ent_q.criteria if hasattr(ent_q, "criteria") else ent_q["criteria"]
-    assert len(ent_crit) <= MAX_OPTIONS_PER_QUESTION
+    assert len(ent_q.criteria) <= MAX_OPTIONS_PER_QUESTION

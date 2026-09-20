@@ -114,6 +114,11 @@ class DecisionEngine(ABC):
     Evaluates a batch of typed questions over state in a single, parallel forward pass.
     """
 
+    @property
+    def loaded(self) -> bool:
+        """Return whether the engine model is currently loaded in memory."""
+        return True
+
     @abstractmethod
     async def async_predict(
         self,
