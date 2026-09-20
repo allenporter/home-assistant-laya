@@ -159,7 +159,7 @@ async def test_farmhouse_batch_candidate_recall(
             if matched_entity:
                 entity_hits += 1
 
-    # Over 90% of utterances should correctly retrieve expected intent in top 3 choices
+    # Over 90% of utterances should correctly retrieve expected intent in top choices
     assert intent_hits / len(cases) > 0.90
     # Over 85% of utterances should correctly retrieve targeted device entity in top 4 choices
     assert entity_hits / len(cases) > 0.85
