@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar, entity_registry as er
 
 from custom_components.laya.speculative.engine import PredictionResult
 from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
@@ -38,15 +40,15 @@ def strategy_fixture() -> SpeculativeFanOutStrategy:
 
 
 @pytest.fixture(name="empty_context")
-def empty_context_fixture() -> MagicMock:
-    """Fixture providing an empty StrategyContext mock."""
-    context = MagicMock(spec=StrategyContext)
-    context.home_name = "My Home"
-    context.area_registry.async_list_areas.return_value = []
-    context.area_registry.async_get_area.return_value = None
-    context.entity_registry.async_get.return_value = None
-    context.states = []
-    return context
+def empty_context_fixture(hass: HomeAssistant) -> StrategyContext:
+    """Fixture providing an empty real StrategyContext."""
+    return StrategyContext(
+        hass=hass,
+        area_registry=ar.async_get(hass),
+        entity_registry=er.async_get(hass),
+        states=[],
+        home_name="My Home",
+    )
 
 
 def test_question_models_dataclasses() -> None:
@@ -117,39 +119,35 @@ def test_intent_handler_slot_info_and_can_fulfill() -> None:
     assert not can_fulfill_intent(unsupported_handler)
 
 
-def test_discovery_and_ranking_with_area_boosting() -> None:
+def test_discovery_and_ranking_with_area_boosting(hass: HomeAssistant) -> None:
     """Test intent discovery, area ranking, and entity ranking with area boosting."""
-    context = MagicMock(spec=StrategyContext)
-    context.hass = MagicMock()
+    area_reg = ar.async_get(hass)
+    entity_reg = er.async_get(hass)
 
-    # Mock area registry
-    area_kitchen = MagicMock()
-    area_kitchen.name = "Kitchen"
-    area_bedroom = MagicMock()
-    area_bedroom.name = "Bedroom"
-    context.area_registry.async_list_areas.return_value = [area_kitchen, area_bedroom]
+    area_kitchen = area_reg.async_get_or_create("Kitchen")
+    area_reg.async_get_or_create("Bedroom")
 
-    # Mock entity states
-    light_kitchen = MagicMock()
-    light_kitchen.entity_id = "light.kitchen_lights"
-    light_kitchen.domain = "light"
-    light_kitchen.attributes = {"friendly_name": "Kitchen Lights"}
-
-    light_bedroom = MagicMock()
-    light_bedroom.entity_id = "light.bedroom_lights"
-    light_bedroom.domain = "light"
-    light_bedroom.attributes = {"friendly_name": "Bedroom Lights"}
-
-    context.states = [light_kitchen, light_bedroom]
-
-    # Mock entity registry entries linking entities to areas
-    entry_k = MagicMock()
-    entry_k.area_id = "kitchen_id"
-    context.area_registry.async_get_area.side_effect = (
-        lambda aid: area_kitchen if aid == "kitchen_id" else None
+    hass.states.async_set(
+        "light.kitchen_lights", "on", {"friendly_name": "Kitchen Lights"}
     )
-    context.entity_registry.async_get.side_effect = (
-        lambda eid: entry_k if eid == "light.kitchen_lights" else None
+    hass.states.async_set(
+        "light.bedroom_lights", "off", {"friendly_name": "Bedroom Lights"}
+    )
+
+    reg_entry = entity_reg.async_get_or_create(
+        domain="light",
+        platform="test",
+        unique_id="kitchen_lights",
+        suggested_object_id="kitchen_lights",
+    )
+    entity_reg.async_update_entity(reg_entry.entity_id, area_id=area_kitchen.id)
+
+    context = StrategyContext(
+        hass=hass,
+        area_registry=area_reg,
+        entity_registry=entity_reg,
+        states=hass.states.async_all(),
+        home_name="My Home",
     )
 
     # Area ranking
@@ -169,7 +167,7 @@ def test_discovery_and_ranking_with_area_boosting() -> None:
 
 async def test_speculative_fan_out_strategy_decision(
     strategy: SpeculativeFanOutStrategy,
-    empty_context: MagicMock,
+    empty_context: StrategyContext,
 ) -> None:
     """Test end-to-end decision evaluation via SpeculativeFanOutStrategy with FakeDecisionEngine."""
     fake_engine = FakeDecisionEngine(
@@ -194,7 +192,7 @@ async def test_speculative_fan_out_strategy_decision(
 
 
 async def test_speculative_fan_out_compound_and_low_confidence(
-    empty_context: MagicMock,
+    empty_context: StrategyContext,
 ) -> None:
     """Test compound command escalation and low confidence handling."""
     strategy = SpeculativeFanOutStrategy(
@@ -223,6 +221,7 @@ async def test_speculative_fan_out_compound_and_low_confidence(
             "is_compound": NoulAnswer(noul=0.01),
         }
     )
+
     low_conf_dec = await strategy.async_decide(
         low_conf_engine, "Turn on light", empty_context
     )
@@ -230,7 +229,9 @@ async def test_speculative_fan_out_compound_and_low_confidence(
     assert low_conf_dec.escalation_reason == "Unhandled intent or low confidence"
 
 
-async def test_intent_driven_domain_filtering(empty_context: MagicMock) -> None:
+async def test_intent_driven_domain_filtering(
+    empty_context: StrategyContext,
+) -> None:
     """Test that candidate entity domains are derived directly from candidate intents."""
     # Dummy handlers mapping
     mock_media_handler = MagicMock()
@@ -265,15 +266,13 @@ async def test_intent_driven_domain_filtering(empty_context: MagicMock) -> None:
     assert info_domains == set(ONOFF_DOMAINS)
 
     # 4. Entity ranking respects allowed_domains
-    mock_light = MagicMock(
-        domain="light", entity_id="light.kitchen", name="Kitchen Light"
+    empty_context.hass.states.async_set(
+        "light.kitchen", "on", {"friendly_name": "Kitchen Light"}
     )
-    mock_speaker = MagicMock(
-        domain="media_player",
-        entity_id="media_player.kitchen_speaker",
-        name="Kitchen Speaker",
+    empty_context.hass.states.async_set(
+        "media_player.kitchen_speaker", "off", {"friendly_name": "Kitchen Speaker"}
     )
-    empty_context.states = [mock_light, mock_speaker]
+    empty_context.states = empty_context.hass.states.async_all()
 
     ranked_media = rank_entities(
         empty_context,
