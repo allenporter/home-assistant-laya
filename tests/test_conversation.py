@@ -88,7 +88,6 @@ async def test_turn_off_entity(hass: HomeAssistant) -> None:
     engine.set_default_answers(
         {
             "intent": ChoiceAnswer(choice="HassTurnOff", confidence=0.95),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.95),
             "target_domain": ChoiceAnswer(choice="light", confidence=0.95),
             "target_entity": ChoiceAnswer(choice="light.desk_lamp", confidence=0.95),
             "light_action": ChoiceAnswer(choice="turn_off", confidence=0.98),
@@ -142,13 +141,12 @@ async def test_climate_temperature(hass: HomeAssistant) -> None:
     engine.set_default_answers(
         {
             "intent": ChoiceAnswer(choice="HassClimateSetTemperature", confidence=0.93),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.90),
             "target_domain": ChoiceAnswer(choice="climate", confidence=0.95),
             "target_entity": ChoiceAnswer(
                 choice="climate.living_room", confidence=0.95
             ),
             "target_temperature": ScoreAnswer(score=2.0, confidence=0.92),
-            "is_compound": NoulAnswer(noul=0.02, confidence=0.98),
+            "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
         }
     )
 
@@ -299,3 +297,53 @@ async def test_unhandled_intent_or_low_confidence(hass: HomeAssistant) -> None:
     assert result.response.response_type == intent.IntentResponseType.ERROR
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
     assert "could not understand" in result.response.speech["plain"]["speech"].lower()
+
+
+async def test_multidomain_device_routing(hass: HomeAssistant) -> None:
+    """Test routing to non-light devices like covers, locks, and vacuums."""
+    hass.states.async_set("cover.garage_door", "open", {"friendly_name": "Garage Door"})
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DEVICE: "cpu"},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    engine: FakeDecisionEngine = entry.runtime_data.engine
+    engine.set_default_answers(
+        {
+            "intent": ChoiceAnswer(choice="HassTurnOff", confidence=0.95),
+            "target_domain": ChoiceAnswer(choice="cover", confidence=0.95),
+            "target_entity": ChoiceAnswer(choice="cover.garage_door", confidence=0.96),
+            "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
+        }
+    )
+
+    handled_intents: list[intent.Intent] = []
+
+    class MockCloseCoverHandler(intent.IntentHandler):
+        intent_type = "HassTurnOff"
+
+        async def async_handle(
+            self, intent_obj: intent.Intent
+        ) -> intent.IntentResponse:
+            handled_intents.append(intent_obj)
+            res = intent.IntentResponse(language=intent_obj.language)
+            res.async_set_speech("Closed garage door")
+            return res
+
+    intent.async_register(hass, MockCloseCoverHandler())
+
+    result = await conversation.async_converse(
+        hass=hass,
+        text="Close the garage door",
+        conversation_id="conv_cover",
+        context=Context(),
+        agent_id=entry.entry_id,
+    )
+
+    assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
+    assert len(handled_intents) == 1
+    assert handled_intents[0].slots["name"]["value"] == "Garage Door"

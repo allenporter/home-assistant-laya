@@ -13,7 +13,7 @@ from .base import (
     ScoreQuestion,
 )
 from .fake import FakeDecisionEngine
-from .local import LocalLayaEngine
+from .local import LocalLayaEngine, async_unload_all_models, get_loaded_models
 
 __all__ = [
     "Answer",
@@ -28,4 +28,6 @@ __all__ = [
     "Question",
     "ScoreAnswer",
     "ScoreQuestion",
+    "async_unload_all_models",
+    "get_loaded_models",
 ]

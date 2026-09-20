@@ -19,7 +19,11 @@ from custom_components.laya.const import (
     DOMAIN,
 )
 
-from custom_components.laya.engine import FakeDecisionEngine, LocalLayaEngine
+from custom_components.laya.engine import (
+    FakeDecisionEngine,
+    LocalLayaEngine,
+    async_unload_all_models,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +79,7 @@ async def create_local_engine_fixture(
     mock_load: MagicMock,
 ) -> AsyncGenerator[Callable[..., LocalLayaEngine], None]:
     """Factory fixture for LocalLayaEngine with automatic teardown."""
+    await async_unload_all_models()
     engines: list[LocalLayaEngine] = []
 
     def _factory(**kwargs: Any) -> LocalLayaEngine:
@@ -86,7 +91,8 @@ async def create_local_engine_fixture(
     yield _factory
 
     for engine in engines:
-        await engine.async_unload()
+        await engine.async_unload(force=True)
+    await async_unload_all_models()
 
 
 @pytest.fixture(scope="session", name="require_laya_model")
@@ -109,6 +115,7 @@ async def mock_dependencies(
 ) -> None:
     """Set up component dependencies."""
     assert await async_setup_component(hass, "homeassistant", {})
+    assert await async_setup_component(hass, "intent", {})
     assert await async_setup_component(hass, "conversation", {})
 
 

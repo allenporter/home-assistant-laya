@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 import gc
 import logging
 from typing import Any
+from typing_extensions import override
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 
@@ -25,6 +27,101 @@ from .base import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class _ModelPoolEntry:
+    """Entry in the process-level model cache keyed by device."""
+
+    def __init__(self, device: str) -> None:
+        """Initialize model pool entry for a device."""
+        self.device = device
+        self.agent: Any = None
+        self.load_lock = asyncio.Lock()
+        self.active_consumers: int = 0
+        self.idle_timer_cancel: Callable[[], None] | None = None
+        self.idle_timeout: float | None = None
+        self.hass: HomeAssistant | None = None
+
+    def cancel_idle_timer(self) -> None:
+        """Cancel any pending idle unload timer."""
+        if self.idle_timer_cancel is not None:
+            self.idle_timer_cancel()
+            self.idle_timer_cancel = None
+
+    def schedule_idle_unload(self) -> None:
+        """Schedule unload after idle_timeout when no active consumers remain."""
+        self.cancel_idle_timer()
+        if self.idle_timeout is None or self.idle_timeout < 0 or self.agent is None:
+            return
+
+        def _on_timeout(*_: Any) -> None:
+            if self.active_consumers == 0:
+                _LOGGER.debug(
+                    "Idle timeout (%.1fs) reached for device %s; unloading Laya model",
+                    self.idle_timeout,
+                    self.device,
+                )
+                if self.hass is not None and self.hass.is_running:
+                    self.hass.async_create_background_task(
+                        self.async_unload(),
+                        f"laya-idle-unload-{self.device}",
+                    )
+                else:
+                    try:
+                        asyncio.create_task(self.async_unload())
+                    except RuntimeError:
+                        pass
+
+        if self.idle_timeout == 0:
+            _on_timeout()
+            return
+
+        if self.hass is not None:
+            self.idle_timer_cancel = async_call_later(
+                self.hass, self.idle_timeout, _on_timeout
+            )
+        else:
+            try:
+                loop = asyncio.get_running_loop()
+                handle = loop.call_later(self.idle_timeout, _on_timeout)
+                self.idle_timer_cancel = handle.cancel
+            except RuntimeError:
+                pass
+
+    async def async_unload(self) -> None:
+        """Evict model from memory."""
+        self.cancel_idle_timer()
+        async with self.load_lock:
+            if self.agent is not None:
+                _LOGGER.debug("Unloading Laya model (%s) from memory", self.device)
+                self.agent = None
+                gc.collect()
+
+
+_LOADED_MODELS: dict[str, _ModelPoolEntry] = {}
+
+
+def get_loaded_models() -> dict[str, Any]:
+    """Return map of currently loaded model agents by device."""
+    return {
+        device: entry.agent
+        for device, entry in _LOADED_MODELS.items()
+        if entry.agent is not None
+    }
+
+
+def _get_or_create_entry(device: str) -> _ModelPoolEntry:
+    """Get or create model pool entry for device."""
+    if device not in _LOADED_MODELS:
+        _LOADED_MODELS[device] = _ModelPoolEntry(device)
+    return _LOADED_MODELS[device]
+
+
+async def async_unload_all_models() -> None:
+    """Unload all cached models across all devices from memory immediately."""
+    for entry in list(_LOADED_MODELS.values()):
+        await entry.async_unload()
+    _LOADED_MODELS.clear()
+
+
 class LocalLayaEngine(DecisionEngine):
     """In-process Laya decision engine using local PyTorch model weights with idle unload."""
 
@@ -38,54 +135,17 @@ class LocalLayaEngine(DecisionEngine):
         self._device = device
         self._hass = hass
         self._idle_timeout = idle_timeout
-        self._agent: Any = None
-        self._load_lock = asyncio.Lock()
-        self._active_consumers: int = 0
-        self._idle_timer_cancel: Callable[[], None] | None = None
+
+    @property
+    def _agent(self) -> Any:
+        """Return the shared model agent for this engine's device if loaded."""
+        entry = _LOADED_MODELS.get(self._device)
+        return entry.agent if entry is not None else None
 
     @property
     def loaded(self) -> bool:
         """Return whether the model is currently loaded in memory."""
         return self._agent is not None
-
-    def _cancel_idle_timer(self) -> None:
-        """Cancel any pending idle unload timer."""
-        if self._idle_timer_cancel is not None:
-            self._idle_timer_cancel()
-            self._idle_timer_cancel = None
-
-    def _schedule_idle_unload(self) -> None:
-        """Schedule unload after idle_timeout when no active consumers remain."""
-        self._cancel_idle_timer()
-        if self._idle_timeout is None or self._idle_timeout < 0 or self._agent is None:
-            return
-
-        def _on_timeout(*_: Any) -> None:
-            if self._active_consumers == 0:
-                _LOGGER.debug(
-                    "Idle timeout (%.1fs) reached with 0 consumers; unloading Laya model",
-                    self._idle_timeout,
-                )
-                if self._hass is not None:
-                    self._hass.async_create_background_task(
-                        self.async_unload(),
-                        "laya-idle-unload",
-                    )
-                else:
-                    asyncio.create_task(self.async_unload())
-
-        if self._idle_timeout == 0:
-            _on_timeout()
-            return
-
-        if self._hass is not None:
-            self._idle_timer_cancel = async_call_later(
-                self._hass, self._idle_timeout, _on_timeout
-            )
-        else:
-            loop = asyncio.get_running_loop()
-            handle = loop.call_later(self._idle_timeout, _on_timeout)
-            self._idle_timer_cancel = handle.cancel
 
     def _load_model_sync(self) -> Any:
         """Synchronously load the Laya model checkpoint."""
@@ -98,28 +158,49 @@ class LocalLayaEngine(DecisionEngine):
 
     async def async_load(self) -> None:
         """Ensure the local model is loaded asynchronously in executor."""
-        if self._agent is not None:
+        entry = _get_or_create_entry(self._device)
+        if entry.agent is not None:
+            entry.cancel_idle_timer()
+            entry.hass = self._hass
+            entry.idle_timeout = self._idle_timeout
+            if (
+                entry.active_consumers == 0
+                and self._idle_timeout is not None
+                and self._idle_timeout > 0
+            ):
+                entry.schedule_idle_unload()
             return
 
-        async with self._load_lock:
-            if self._agent is not None:
+        async with entry.load_lock:
+            if entry.agent is not None:
+                entry.cancel_idle_timer()
+                entry.hass = self._hass
+                entry.idle_timeout = self._idle_timeout
+                if (
+                    entry.active_consumers == 0
+                    and self._idle_timeout is not None
+                    and self._idle_timeout > 0
+                ):
+                    entry.schedule_idle_unload()
                 return
 
             _LOGGER.debug("Loading Laya model (device: %s)...", self._device)
             if self._hass is not None:
-                self._agent = await self._hass.async_add_executor_job(
-                    self._load_model_sync
-                )
+                agent = await self._hass.async_add_executor_job(self._load_model_sync)
             else:
-                self._agent = await asyncio.to_thread(self._load_model_sync)
+                agent = await asyncio.to_thread(self._load_model_sync)
             _LOGGER.debug("Laya model successfully loaded")
 
+            entry.agent = agent
+            entry.hass = self._hass
+            entry.idle_timeout = self._idle_timeout
+
             if (
-                self._active_consumers == 0
+                entry.active_consumers == 0
                 and self._idle_timeout is not None
                 and self._idle_timeout > 0
             ):
-                self._schedule_idle_unload()
+                entry.schedule_idle_unload()
 
     def _predict_sync(
         self,
@@ -127,7 +208,10 @@ class LocalLayaEngine(DecisionEngine):
         questions: dict[str, Any],
     ) -> dict[str, Any]:
         """Run synchronous forward pass on agent."""
-        return self._agent.predict(state, questions)
+        agent = self._agent
+        if agent is None:
+            raise RuntimeError("Laya model is not loaded in memory")
+        return agent.predict(state, questions)
 
     async def async_predict(
         self,
@@ -135,8 +219,9 @@ class LocalLayaEngine(DecisionEngine):
         questions: Mapping[str, Any],
     ) -> PredictionResult:
         """Run inference over questions in executor thread."""
-        self._cancel_idle_timer()
-        self._active_consumers += 1
+        entry = _get_or_create_entry(self._device)
+        entry.cancel_idle_timer()
+        entry.active_consumers += 1
 
         try:
             await self.async_load()
@@ -159,12 +244,12 @@ class LocalLayaEngine(DecisionEngine):
                     self._predict_sync, state, serialized_questions
                 )
         finally:
-            self._active_consumers -= 1
-            if self._active_consumers == 0:
+            entry.active_consumers -= 1
+            if entry.active_consumers == 0:
                 if self._idle_timeout == 0:
-                    await self.async_unload()
+                    await self.async_unload(force=True)
                 else:
-                    self._schedule_idle_unload()
+                    entry.schedule_idle_unload()
 
         raw_answers = raw_res.get("answers", {})
         answers: dict[str, Answer] = {}
@@ -201,11 +286,25 @@ class LocalLayaEngine(DecisionEngine):
             usage=raw_res.get("usage", {}),
         )
 
-    async def async_unload(self) -> None:
-        """Unload model from memory."""
-        self._cancel_idle_timer()
-        async with self._load_lock:
-            if self._agent is not None:
-                _LOGGER.debug("Unloading Laya model from memory")
-                self._agent = None
-                gc.collect()
+    @override
+    async def async_unload(self, force: bool = False) -> None:
+        """Unload model from memory.
+
+        If force is False and idle_timeout > 0, the model weights remain warm in the
+        pool so subsequent config entries or tests can reuse them without re-loading.
+        """
+        entry = _LOADED_MODELS.get(self._device)
+        if entry is None or entry.agent is None:
+            return
+
+        if not force and self._idle_timeout is not None and self._idle_timeout > 0:
+            _LOGGER.debug(
+                "async_unload called for device %s with idle_timeout=%.1fs; keeping model warm",
+                self._device,
+                self._idle_timeout,
+            )
+            if entry.active_consumers == 0:
+                entry.schedule_idle_unload()
+            return
+
+        await entry.async_unload()
