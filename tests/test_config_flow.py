@@ -10,6 +10,7 @@ from custom_components.laya.const import (
     CONF_CONFIDENCE_THRESHOLD,
     CONF_DEVICE,
     CONF_FALLBACK_AGENT,
+    CONF_IDLE_TIMEOUT,
     DOMAIN,
 )
 
@@ -51,11 +52,13 @@ async def test_options_flow_thresholds(hass: HomeAssistant) -> None:
         user_input={
             CONF_COMPOUND_THRESHOLD: 0.85,
             CONF_CONFIDENCE_THRESHOLD: 0.60,
+            CONF_IDLE_TIMEOUT: 120.0,
         },
     )
     assert result2["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_COMPOUND_THRESHOLD] == 0.85
     assert entry.options[CONF_CONFIDENCE_THRESHOLD] == 0.60
+    assert entry.options[CONF_IDLE_TIMEOUT] == 120.0
 
 
 async def test_options_flow_fallback_agent(hass: HomeAssistant) -> None:

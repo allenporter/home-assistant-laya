@@ -1,9 +1,13 @@
 """Tests for decision engine implementations."""
 
+import asyncio
+from unittest.mock import MagicMock, patch
+
 from custom_components.laya.engine import (
     ChoiceAnswer,
     ChoiceQuestion,
     FakeDecisionEngine,
+    LocalLayaEngine,
     NoulAnswer,
     NoulQuestion,
     PredictionResult,
@@ -83,3 +87,71 @@ async def test_fake_decision_engine_queued_results() -> None:
     intent_answer = result.answers["intent"]
     assert isinstance(intent_answer, ChoiceAnswer)
     assert intent_answer.choice == "HassTurnOff"
+
+
+async def test_local_engine_eager_load_and_idle_unload() -> None:
+    """Test LocalLayaEngine eager load and automatic idle unload."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = {
+        "model": "laya-test",
+        "answers": {"q": {"type": "choice", "choice": "opt1", "confidence": 0.9}},
+    }
+
+    with patch("laya.load", return_value=mock_model) as mock_load:
+        engine = LocalLayaEngine(device="cpu", idle_timeout=0.05)
+        try:
+            assert engine._agent is None
+
+            # Eager load
+            await engine.async_load()
+            assert engine._agent is mock_model
+            assert mock_load.call_count == 1
+
+            # Wait for idle timeout to trigger unload
+            await asyncio.sleep(0.08)
+            assert engine._agent is None
+        finally:
+            await engine.async_unload()
+
+
+async def test_local_engine_predict_keepalive() -> None:
+    """Test LocalLayaEngine predict keeps model alive and reloads if unloaded."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = {
+        "model": "laya-test",
+        "answers": {"q": {"type": "choice", "choice": "opt1", "confidence": 0.9}},
+    }
+
+    with patch("laya.load", return_value=mock_model) as mock_load:
+        engine = LocalLayaEngine(device="cpu", idle_timeout=0.08)
+        try:
+            # 1. First predict triggers load
+            res = await engine.async_predict(
+                "hello", {"q": ChoiceQuestion("test", {"opt1": "1"})}
+            )
+            assert res.answers["q"].choice == "opt1"
+            assert engine._agent is mock_model
+            assert mock_load.call_count == 1
+
+            # 2. Utterance before idle timeout resets timer
+            await asyncio.sleep(0.04)
+            assert engine._agent is mock_model
+            res2 = await engine.async_predict(
+                "hello again", {"q": ChoiceQuestion("test", {"opt1": "1"})}
+            )
+            assert res2.answers["q"].choice == "opt1"
+            assert mock_load.call_count == 1  # No reload needed
+
+            # 3. Idle timeout expires -> unloaded
+            await asyncio.sleep(0.12)
+            assert engine._agent is None
+
+            # 4. New prediction reloads model
+            res3 = await engine.async_predict(
+                "waking up", {"q": ChoiceQuestion("test", {"opt1": "1"})}
+            )
+            assert res3.answers["q"].choice == "opt1"
+            assert engine._agent is mock_model
+            assert mock_load.call_count == 2
+        finally:
+            await engine.async_unload()

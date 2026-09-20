@@ -122,5 +122,8 @@ class DecisionEngine(ABC):
     ) -> PredictionResult:
         """Evaluate a batch of questions over state in a single forward pass."""
 
+    async def async_load(self) -> None:
+        """Eagerly load model or initialize resources."""
+
     async def async_unload(self) -> None:
         """Release any held resources/models."""

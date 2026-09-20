@@ -11,9 +11,11 @@ from .const import (
     CONF_COMPOUND_THRESHOLD,
     CONF_CONFIDENCE_THRESHOLD,
     CONF_DEVICE,
+    CONF_IDLE_TIMEOUT,
     DEFAULT_COMPOUND_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_DEVICE,
+    DEFAULT_IDLE_TIMEOUT,
 )
 from .engine import LocalLayaEngine
 from .models import LayaConfigEntry, LayaData
@@ -27,7 +29,13 @@ PLATFORMS: tuple[Platform, ...] = (Platform.CONVERSATION,)
 async def async_setup_entry(hass: HomeAssistant, entry: LayaConfigEntry) -> bool:
     """Set up a config entry."""
     device = entry.data.get(CONF_DEVICE, DEFAULT_DEVICE)
-    engine = LocalLayaEngine(device=device, hass=hass)
+    idle_timeout = float(
+        entry.options.get(
+            CONF_IDLE_TIMEOUT,
+            entry.data.get(CONF_IDLE_TIMEOUT, DEFAULT_IDLE_TIMEOUT),
+        )
+    )
+    engine = LocalLayaEngine(device=device, hass=hass, idle_timeout=idle_timeout)
 
     compound_th = float(
         entry.options.get(
@@ -48,6 +56,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: LayaConfigEntry) -> bool
     )
 
     entry.runtime_data = LayaData(engine=engine, strategy=strategy)
+
+    # Eagerly preload model weights so first utterance is immediate
+    await engine.async_load()
 
     await hass.config_entries.async_forward_entry_setups(
         entry,

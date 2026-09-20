@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+import gc
+import logging
 from typing import Any
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from .base import (
     Answer,
@@ -19,20 +22,61 @@ from .base import (
     ScoreQuestion,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class LocalLayaEngine(DecisionEngine):
-    """In-process Laya decision engine using the local PyTorch model weights."""
+    """In-process Laya decision engine using local PyTorch model weights with idle unload."""
 
     def __init__(
         self,
         device: str = "auto",
         hass: HomeAssistant | None = None,
+        idle_timeout: float | None = 300.0,
     ) -> None:
         """Initialize LocalLayaEngine."""
         self._device = device
         self._hass = hass
+        self._idle_timeout = idle_timeout
         self._agent: Any = None
         self._load_lock = asyncio.Lock()
+        self._active_consumers: int = 0
+        self._idle_timer_cancel: Callable[[], None] | None = None
+
+    def _cancel_idle_timer(self) -> None:
+        """Cancel any pending idle unload timer."""
+        if self._idle_timer_cancel is not None:
+            self._idle_timer_cancel()
+            self._idle_timer_cancel = None
+
+    def _schedule_idle_unload(self) -> None:
+        """Schedule unload after idle_timeout when no active consumers remain."""
+        self._cancel_idle_timer()
+        if self._idle_timeout is None or self._idle_timeout <= 0 or self._agent is None:
+            return
+
+        def _on_timeout(*_: Any) -> None:
+            if self._active_consumers == 0:
+                _LOGGER.debug(
+                    "Idle timeout (%.1fs) reached with 0 consumers; unloading Laya model",
+                    self._idle_timeout,
+                )
+                if self._hass is not None:
+                    self._hass.async_create_background_task(
+                        self.async_unload(),
+                        "laya-idle-unload",
+                    )
+                else:
+                    asyncio.create_task(self.async_unload())
+
+        if self._hass is not None:
+            self._idle_timer_cancel = async_call_later(
+                self._hass, self._idle_timeout, _on_timeout
+            )
+        else:
+            loop = asyncio.get_running_loop()
+            handle = loop.call_later(self._idle_timeout, _on_timeout)
+            self._idle_timer_cancel = handle.cancel
 
     def _load_model_sync(self) -> Any:
         """Synchronously load the Laya model checkpoint."""
@@ -52,12 +96,17 @@ class LocalLayaEngine(DecisionEngine):
             if self._agent is not None:
                 return
 
+            _LOGGER.debug("Loading Laya model (device: %s)...", self._device)
             if self._hass is not None:
                 self._agent = await self._hass.async_add_executor_job(
                     self._load_model_sync
                 )
             else:
                 self._agent = await asyncio.to_thread(self._load_model_sync)
+            _LOGGER.debug("Laya model successfully loaded")
+
+            if self._active_consumers == 0:
+                self._schedule_idle_unload()
 
     def _predict_sync(
         self,
@@ -73,25 +122,33 @@ class LocalLayaEngine(DecisionEngine):
         questions: Mapping[str, Any],
     ) -> PredictionResult:
         """Run inference over questions in executor thread."""
-        await self.async_load()
+        self._cancel_idle_timer()
+        self._active_consumers += 1
 
-        serialized_questions: dict[str, dict[str, Any]] = {}
-        for qid, q in questions.items():
-            if isinstance(q, (ChoiceQuestion, NoulQuestion, ScoreQuestion)):
-                serialized_questions[qid] = q.to_dict()
-            elif isinstance(q, dict):
-                serialized_questions[qid] = q
+        try:
+            await self.async_load()
+
+            serialized_questions: dict[str, dict[str, Any]] = {}
+            for qid, q in questions.items():
+                if isinstance(q, (ChoiceQuestion, NoulQuestion, ScoreQuestion)):
+                    serialized_questions[qid] = q.to_dict()
+                elif isinstance(q, dict):
+                    serialized_questions[qid] = q
+                else:
+                    serialized_questions[qid] = dict(q)
+
+            if self._hass is not None:
+                raw_res = await self._hass.async_add_executor_job(
+                    self._predict_sync, state, serialized_questions
+                )
             else:
-                serialized_questions[qid] = dict(q)
-
-        if self._hass is not None:
-            raw_res = await self._hass.async_add_executor_job(
-                self._predict_sync, state, serialized_questions
-            )
-        else:
-            raw_res = await asyncio.to_thread(
-                self._predict_sync, state, serialized_questions
-            )
+                raw_res = await asyncio.to_thread(
+                    self._predict_sync, state, serialized_questions
+                )
+        finally:
+            self._active_consumers -= 1
+            if self._active_consumers == 0:
+                self._schedule_idle_unload()
 
         raw_answers = raw_res.get("answers", {})
         answers: dict[str, Answer] = {}
@@ -130,4 +187,9 @@ class LocalLayaEngine(DecisionEngine):
 
     async def async_unload(self) -> None:
         """Unload model from memory."""
-        self._agent = None
+        self._cancel_idle_timer()
+        async with self._load_lock:
+            if self._agent is not None:
+                _LOGGER.debug("Unloading Laya model from memory")
+                self._agent = None
+                gc.collect()

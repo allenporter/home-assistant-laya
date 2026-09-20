@@ -19,9 +19,11 @@ from .const import (
     CONF_CONFIDENCE_THRESHOLD,
     CONF_DEVICE,
     CONF_FALLBACK_AGENT,
+    CONF_IDLE_TIMEOUT,
     DEFAULT_COMPOUND_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_DEVICE,
+    DEFAULT_IDLE_TIMEOUT,
     DOMAIN,
 )
 
@@ -96,6 +98,20 @@ class LayaOptionsFlowHandler(OptionsFlow):
                         max=1.0,
                         step=0.05,
                         mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_IDLE_TIMEOUT,
+                    default=self.config_entry.options.get(
+                        CONF_IDLE_TIMEOUT, DEFAULT_IDLE_TIMEOUT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=3600,
+                        step=30,
+                        unit_of_measurement="seconds",
+                        mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
                 vol.Optional(
