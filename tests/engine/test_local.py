@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import pytest
+
 from custom_components.laya.engine import ChoiceQuestion, LocalLayaEngine
 
 TEST_QUESTIONS = {"q": ChoiceQuestion("test", {"opt1": "1"})}
@@ -98,3 +100,34 @@ async def test_local_engine_zero_idle_timeout_unloads_immediately(
     assert res.answers["q"].choice == "opt1"
     assert mock_load.call_count == 1
     assert not engine.loaded
+
+
+@pytest.mark.slow
+async def test_live_local_engine_turn_on_light(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live inference test verifying real Laya weights predict turn on light."""
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    engine = LocalLayaEngine(device="cpu", idle_timeout=10.0)
+    questions = {
+        "intent": ChoiceQuestion(
+            "Determine the primary action",
+            {
+                "HassTurnOn": "Turn on or activate device or light",
+                "HassTurnOff": "Turn off or stop device or light",
+            },
+        ),
+        "target_domain": ChoiceQuestion(
+            "What device domain is targeted?",
+            {
+                "light": "Lighting devices and lamps",
+                "switch": "Switches and power outlets",
+            },
+        ),
+    }
+    try:
+        res = await engine.async_predict("Turn on the light", questions)
+        assert res.answers["intent"].choice == "HassTurnOn"
+        assert res.answers["target_domain"].choice == "light"
+    finally:
+        await engine.async_unload()
