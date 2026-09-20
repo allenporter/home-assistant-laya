@@ -155,3 +155,25 @@ async def test_local_engine_predict_keepalive() -> None:
             assert mock_load.call_count == 2
         finally:
             await engine.async_unload()
+
+
+async def test_local_engine_zero_idle_timeout_unloads_immediately() -> None:
+    """Test LocalLayaEngine with idle_timeout=0 unloads immediately after prediction."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = {
+        "model": "laya-test",
+        "answers": {"q": {"type": "choice", "choice": "opt1", "confidence": 0.9}},
+    }
+
+    with patch("laya.load", return_value=mock_model) as mock_load:
+        engine = LocalLayaEngine(device="cpu", idle_timeout=0.0)
+        try:
+            res = await engine.async_predict(
+                "test", {"q": ChoiceQuestion("test", {"opt1": "1"})}
+            )
+            assert res.answers["q"].choice == "opt1"
+            assert mock_load.call_count == 1
+            # When idle_timeout is 0, model unloads immediately once prediction finishes
+            assert engine._agent is None
+        finally:
+            await engine.async_unload()

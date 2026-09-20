@@ -32,7 +32,7 @@ class LocalLayaEngine(DecisionEngine):
         self,
         device: str = "auto",
         hass: HomeAssistant | None = None,
-        idle_timeout: float | None = 300.0,
+        idle_timeout: float | None = 0.0,
     ) -> None:
         """Initialize LocalLayaEngine."""
         self._device = device
@@ -52,7 +52,7 @@ class LocalLayaEngine(DecisionEngine):
     def _schedule_idle_unload(self) -> None:
         """Schedule unload after idle_timeout when no active consumers remain."""
         self._cancel_idle_timer()
-        if self._idle_timeout is None or self._idle_timeout <= 0 or self._agent is None:
+        if self._idle_timeout is None or self._idle_timeout < 0 or self._agent is None:
             return
 
         def _on_timeout(*_: Any) -> None:
@@ -68,6 +68,10 @@ class LocalLayaEngine(DecisionEngine):
                     )
                 else:
                     asyncio.create_task(self.async_unload())
+
+        if self._idle_timeout == 0:
+            _on_timeout()
+            return
 
         if self._hass is not None:
             self._idle_timer_cancel = async_call_later(
@@ -105,7 +109,11 @@ class LocalLayaEngine(DecisionEngine):
                 self._agent = await asyncio.to_thread(self._load_model_sync)
             _LOGGER.debug("Laya model successfully loaded")
 
-            if self._active_consumers == 0:
+            if (
+                self._active_consumers == 0
+                and self._idle_timeout is not None
+                and self._idle_timeout > 0
+            ):
                 self._schedule_idle_unload()
 
     def _predict_sync(
@@ -148,7 +156,10 @@ class LocalLayaEngine(DecisionEngine):
         finally:
             self._active_consumers -= 1
             if self._active_consumers == 0:
-                self._schedule_idle_unload()
+                if self._idle_timeout == 0:
+                    await self.async_unload()
+                else:
+                    self._schedule_idle_unload()
 
         raw_answers = raw_res.get("answers", {})
         answers: dict[str, Answer] = {}

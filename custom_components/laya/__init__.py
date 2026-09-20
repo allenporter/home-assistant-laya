@@ -57,8 +57,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: LayaConfigEntry) -> bool
 
     entry.runtime_data = LayaData(engine=engine, strategy=strategy)
 
-    # Eagerly preload model weights so first utterance is immediate
-    await engine.async_load()
+    # Eagerly preload model weights if keepalive is enabled (> 0)
+    if idle_timeout > 0:
+        await engine.async_load()
 
     await hass.config_entries.async_forward_entry_setups(
         entry,

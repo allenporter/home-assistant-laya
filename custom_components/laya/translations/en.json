@@ -18,7 +18,7 @@
         "data": {
           "compound_threshold": "Compound Utterance Threshold (P > threshold triggers System 2)",
           "confidence_threshold": "Minimum Confidence Threshold",
-          "idle_timeout": "Idle Timeout (seconds, 0 to keep loaded)",
+          "idle_timeout": "Idle Timeout (seconds, 0 to always unload immediately)",
           "fallback_agent": "System 2 Fallback Conversation Agent"
         }
       }
