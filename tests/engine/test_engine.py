@@ -125,7 +125,7 @@ async def test_local_engine_predict_keepalive() -> None:
     with patch("laya.load", return_value=mock_model) as mock_load:
         engine = LocalLayaEngine(device="cpu", idle_timeout=0.08)
         try:
-            # 1. First predict triggers load
+            # First predict triggers load
             res = await engine.async_predict(
                 "hello", {"q": ChoiceQuestion("test", {"opt1": "1"})}
             )
@@ -133,7 +133,7 @@ async def test_local_engine_predict_keepalive() -> None:
             assert engine.loaded
             assert mock_load.call_count == 1
 
-            # 2. Utterance before idle timeout resets timer
+            # Utterance before idle timeout resets timer
             await asyncio.sleep(0.04)
             assert engine.loaded
             res2 = await engine.async_predict(
@@ -142,11 +142,11 @@ async def test_local_engine_predict_keepalive() -> None:
             assert res2.answers["q"].choice == "opt1"
             assert mock_load.call_count == 1  # No reload needed
 
-            # 3. Idle timeout expires -> unloaded
+            # Idle timeout expires and unloads model
             await asyncio.sleep(0.12)
             assert not engine.loaded
 
-            # 4. New prediction reloads model
+            # Subsequent prediction transparently reloads model
             res3 = await engine.async_predict(
                 "waking up", {"q": ChoiceQuestion("test", {"opt1": "1"})}
             )
