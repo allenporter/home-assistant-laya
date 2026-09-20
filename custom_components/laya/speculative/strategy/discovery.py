@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 import logging
 import re
 
@@ -12,23 +13,84 @@ from .base import StrategyContext
 
 _LOGGER = logging.getLogger(__name__)
 
-CONTROLLABLE_DOMAINS: frozenset[str] = frozenset(
+INFORMATIONAL_INTENTS: frozenset[str] = frozenset(
+    {
+        "HassGetState",
+        "HassGetTemperature",
+        "HassClimateGetTemperature",
+        "HassGetWeather",
+        "HassGetCurrentDate",
+        "HassGetCurrentTime",
+        "HassNevermind",
+        "HassRespond",
+        # Timer intents (handled by timer manager / conversation fallback)
+        "HassStartTimer",
+        "HassCancelTimer",
+        "HassCancelAllTimers",
+        "HassPauseTimer",
+        "HassUnpauseTimer",
+        "HassIncreaseTimer",
+        "HassDecreaseTimer",
+        "HassTimerStatus",
+        # List / to-do intents (handled by list manager / conversation fallback)
+        "HassListAddItem",
+        "HassListCompleteItem",
+        "HassListRemoveItem",
+        "HassShoppingListAddItem",
+        "HassShoppingListCompleteItem",
+        "HassShoppingListLastItems",
+    }
+)
+
+ONOFF_DOMAINS: frozenset[str] = frozenset(
     {
         "light",
         "switch",
-        "climate",
-        "cover",
-        "media_player",
         "fan",
+        "cover",
+        "valve",
         "lock",
+        "climate",
+        "media_player",
         "vacuum",
+        "humidifier",
+        "water_heater",
+        "lawn_mower",
+        "siren",
+        "remote",
+        "button",
+        "input_boolean",
+        "input_button",
         "scene",
         "script",
         "automation",
-        "humidifier",
-        "water_heater",
     }
 )
+
+# Backward-compatible alias
+CONTROLLABLE_DOMAINS: frozenset[str] = ONOFF_DOMAINS
+
+
+def get_allowed_domains_for_intents(
+    candidate_intent_types: Collection[str],
+    handlers_by_type: dict[str, intent.IntentHandler] | None = None,
+) -> set[str]:
+    """Derive allowed entity domains from candidate intents and their platform handlers."""
+    allowed_domains: set[str] = set()
+    handlers = handlers_by_type or {}
+
+    for itype in candidate_intent_types:
+        if itype == "unmatched" or itype in INFORMATIONAL_INTENTS:
+            continue
+        handler = handlers.get(itype)
+        platforms = getattr(handler, "platforms", None) if handler else None
+        if platforms:
+            allowed_domains.update(platforms)
+        elif itype in ("HassTurnOn", "HassTurnOff", "HassToggle"):
+            allowed_domains.update(ONOFF_DOMAINS)
+
+    return allowed_domains if allowed_domains else set(ONOFF_DOMAINS)
+
 
 SUPPORTED_STRATEGY_SLOTS: frozenset[str] = frozenset(
     {"name", "area", "domain", "floor", "device_class", "brightness", "temperature"}
@@ -40,6 +102,14 @@ CANONICAL_INTENT_DESCRIPTIONS: dict[str, str] = {
     "HassToggle": "Toggle a device on or off",
     "HassLightSet": "Set brightness, dim, or change color of lights",
     "HassClimateSetTemperature": "Set target temperature for thermostat or climate device",
+    "HassMediaPause": "Pause media playback, music, or speaker",
+    "HassMediaUnpause": "Resume or unpause media playback, music, or speaker",
+    "HassMediaNextTrack": "Skip to next song or track on media player",
+    "HassMediaPreviousTrack": "Go to previous song or track on media player",
+    "HassSetVolume": "Set volume level of a speaker or media player",
+    "HassOpenCover": "Open a garage door, cover, blinds, or shades",
+    "HassCloseCover": "Close a garage door, cover, blinds, or shades",
+    "HassStopMoving": "Stop movement of a garage door, cover, or shades",
 }
 
 
@@ -139,7 +209,7 @@ def discover_intents(
     if registered_handlers:
         for handler in registered_handlers:
             intent_type = handler.intent_type
-            if not can_fulfill_intent(handler):
+            if intent_type in INFORMATIONAL_INTENTS or not can_fulfill_intent(handler):
                 continue
 
             desc = CANONICAL_INTENT_DESCRIPTIONS.get(intent_type)
@@ -225,6 +295,7 @@ def rank_entities(
     utterance: str,
     active_areas: set[str],
     max_options: int = 15,
+    allowed_domains: set[str] | None = None,
 ) -> dict[str, str]:
     """Rank entity candidates based on lexical similarity and area boosting.
 
@@ -241,18 +312,21 @@ def rank_entities(
         active_areas: Set of top candidate area names identified from the utterance.
         max_options: Maximum number of candidate entities to include in the Choice question criteria.
             Limits the candidate pool to the most relevant devices for model selection.
+        allowed_domains: Optional set of entity domains allowed for this query. If omitted,
+            defaults to all actionable device domains (ONOFF_DOMAINS).
 
     Returns:
         Dictionary mapping entity_id to descriptive label (name, domain, area) for Choice criteria.
     """
     query_tokens = tokenize(utterance)
     full_query = utterance.lower()
+    target_domains = allowed_domains if allowed_domains is not None else ONOFF_DOMAINS
 
     scored_entities: list[tuple[float, str, str]] = []
 
     for state in context.states:
         domain = state.domain
-        if domain not in CONTROLLABLE_DOMAINS:
+        if domain not in target_domains:
             continue
 
         friendly_name = state.attributes.get("friendly_name") or state.entity_id
@@ -261,7 +335,7 @@ def rank_entities(
         area_name: str | None = None
         if entry and entry.area_id:
             area_entry = context.area_registry.async_get_area(entry.area_id)
-            if area_entry:
+            if area_entry and isinstance(area_entry.name, str):
                 area_name = area_entry.name
 
         base_score = lexical_score(

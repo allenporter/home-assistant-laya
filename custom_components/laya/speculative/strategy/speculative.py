@@ -17,8 +17,10 @@ from ..models import (
 from .base import Decision, DecisionStrategy, StrategyContext
 from .discovery import (
     CANONICAL_INTENT_DESCRIPTIONS,
-    CONTROLLABLE_DOMAINS,
+    INFORMATIONAL_INTENTS,
+    ONOFF_DOMAINS,
     can_fulfill_intent,
+    get_allowed_domains_for_intents,
     lexical_score,
     tokenize,
 )
@@ -67,7 +69,11 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         for handler in registered_handlers:
             intent_type = getattr(handler, "intent_type", None)
-            if not intent_type or not can_fulfill_intent(handler):
+            if (
+                not intent_type
+                or intent_type in INFORMATIONAL_INTENTS
+                or not can_fulfill_intent(handler)
+            ):
                 continue
             desc = getattr(
                 handler, "description", ""
@@ -81,6 +87,8 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         # Fallback to defaults if no registered handlers exist
         if not scored_intents:
             for itype, desc in CANONICAL_INTENT_DESCRIPTIONS.items():
+                if itype in INFORMATIONAL_INTENTS:
+                    continue
                 name_readable = itype.replace("Hass", " ")
                 score = lexical_score(query_tokens, desc, utterance) + lexical_score(
                     query_tokens, name_readable, utterance
@@ -111,15 +119,19 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         context: StrategyContext,
         utterance: str,
         top_area_ids: set[str] | None = None,
+        allowed_domains: set[str] | None = None,
     ) -> dict[str, str]:
         """Discover and rank candidate exposed entities."""
         query_tokens = tokenize(utterance)
         scored_entities: list[tuple[float, str, str]] = []
+        target_domains = (
+            allowed_domains if allowed_domains is not None else ONOFF_DOMAINS
+        )
 
         states = context.states if context.states is not None else []
         for state in states:
             domain = getattr(state, "domain", None)
-            if not domain or domain not in CONTROLLABLE_DOMAINS:
+            if not domain or domain not in target_domains:
                 continue
 
             entity_id = state.entity_id
@@ -420,8 +432,26 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         """Build canonical Question objects and serialized dictionary representation."""
         intent_criteria = self._discover_intents(context, utterance)
         area_criteria = self._rank_areas(context, utterance)
+
+        handlers_map: dict[str, intent.IntentHandler] = {}
+        if context.hass:
+            try:
+                handlers_map = {
+                    h.intent_type: h for h in intent.async_get(context.hass)
+                }
+            except Exception:
+                handlers_map = {}
+
+        candidate_intent_types = [k for k in intent_criteria.keys() if k != "unmatched"]
+        allowed_domains = get_allowed_domains_for_intents(
+            candidate_intent_types, handlers_map
+        )
+
         entity_criteria = self._rank_entities(
-            context, utterance, set(area_criteria.keys())
+            context,
+            utterance,
+            set(area_criteria.keys()),
+            allowed_domains=allowed_domains,
         )
 
         canonical: dict[str, Question] = {

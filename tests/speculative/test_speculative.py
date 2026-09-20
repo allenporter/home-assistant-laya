@@ -17,7 +17,9 @@ from custom_components.laya.speculative.models import (
 )
 from custom_components.laya.speculative.strategy.base import StrategyContext
 from custom_components.laya.speculative.strategy.discovery import (
+    ONOFF_DOMAINS,
     can_fulfill_intent,
+    get_allowed_domains_for_intents,
     get_handler_slot_info,
     lexical_score,
     rank_areas,
@@ -224,3 +226,65 @@ async def test_speculative_fan_out_compound_and_low_confidence(
     )
     assert low_conf_dec.should_escalate
     assert low_conf_dec.escalation_reason == "Unhandled intent or low confidence"
+
+
+async def test_intent_driven_domain_filtering(empty_context: MagicMock) -> None:
+    """Test that candidate entity domains are derived directly from candidate intents."""
+    # Dummy handlers mapping
+    mock_media_handler = MagicMock()
+    mock_media_handler.platforms = {"media_player"}
+
+    mock_light_handler = MagicMock()
+    mock_light_handler.platforms = {"light"}
+
+    handlers = {
+        "HassMediaPause": mock_media_handler,
+        "HassLightSet": mock_light_handler,
+    }
+
+    # 1. Specialized intent narrows to its platform
+    media_domains = get_allowed_domains_for_intents(["HassMediaPause"], handlers)
+    assert media_domains == {"media_player"}
+
+    light_domains = get_allowed_domains_for_intents(["HassLightSet"], handlers)
+    assert light_domains == {"light"}
+
+    # 2. Generic intent falls back to ONOFF_DOMAINS
+    turn_on_domains = get_allowed_domains_for_intents(["HassTurnOn"], handlers)
+    assert turn_on_domains == set(ONOFF_DOMAINS)
+    assert "light" in turn_on_domains
+    assert "cover" in turn_on_domains
+    assert "valve" in turn_on_domains
+    assert "sensor" not in turn_on_domains
+    assert "binary_sensor" not in turn_on_domains
+
+    # 3. Informational intent is ignored
+    info_domains = get_allowed_domains_for_intents(["HassGetState"], handlers)
+    assert info_domains == set(ONOFF_DOMAINS)
+
+    # 4. Entity ranking respects allowed_domains
+    empty_context.entity_registry.async_get.return_value = None
+    mock_light = MagicMock(
+        domain="light", entity_id="light.kitchen", name="Kitchen Light"
+    )
+    mock_speaker = MagicMock(
+        domain="media_player",
+        entity_id="media_player.kitchen_speaker",
+        name="Kitchen Speaker",
+    )
+    empty_context.states = [mock_light, mock_speaker]
+
+    ranked_media = rank_entities(
+        empty_context,
+        "pause kitchen",
+        active_areas=set(),
+        allowed_domains={"media_player"},
+    )
+    assert "media_player.kitchen_speaker" in ranked_media
+    assert "light.kitchen" not in ranked_media
+
+    ranked_light = rank_entities(
+        empty_context, "turn on kitchen", active_areas=set(), allowed_domains={"light"}
+    )
+    assert "light.kitchen" in ranked_light
+    assert "media_player.kitchen_speaker" not in ranked_light

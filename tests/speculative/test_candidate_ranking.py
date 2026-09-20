@@ -24,9 +24,9 @@ def farmhouse_context_fixture(hass: HomeAssistant):
 
 
 async def test_farmhouse_context_loaded(farmhouse_context) -> None:
-    """Verify that the farmhouse context has all 12 areas and 28 unique entities loaded."""
+    """Verify that the farmhouse context has all 12 areas and 29 unique entities loaded."""
     assert len(farmhouse_context.area_registry.areas) == 12
-    assert len(farmhouse_context.states) == 28
+    assert len(farmhouse_context.states) == 29
     assert farmhouse_context.home_name == "Family Farmhouse"
 
 
@@ -112,7 +112,7 @@ async def test_farmhouse_decision_routing(
 async def test_farmhouse_labeled_cases_loading() -> None:
     """Test that all supported labeled action cases from family-farmhouse-us are parsed."""
     cases = load_device_action_cases()
-    assert len(cases) == 161
+    assert len(cases) == 173
 
     sentences = {c.sentence: c for c in cases}
     assert "Please turn on the Kitchen Light" in sentences
@@ -126,6 +126,75 @@ async def test_farmhouse_labeled_cases_loading() -> None:
         sentences["Set the Kitchen Light to 50% brightness"].expected_intent
         == "HassLightSet"
     )
+
+    assert "Open the garage door" in sentences
+    assert sentences["Open the garage door"].expected_intent == "HassOpenCover"
+    assert "Stop moving the garage door" in sentences
+    assert sentences["Stop moving the garage door"].expected_intent == "HassStopMoving"
+
+
+async def test_farmhouse_hard_disambiguation_recall(farmhouse_context) -> None:
+    """Test disambiguation across identical device names using area tokens."""
+    strategy = SpeculativeFanOutStrategy()
+    engine = FakeDecisionEngine()
+
+    # Family room speaker
+    await strategy.async_decide(
+        engine, "Pause the music in the family room", farmhouse_context
+    )
+    questions = engine.calls[-1]["questions"]
+    assert "target_area" in questions
+    assert "family_room" in questions["target_area"].criteria
+    assert "target_entity" in questions
+    assert "media_player.smart_speaker" in questions["target_entity"].criteria
+
+    # Master bedroom speaker
+    await strategy.async_decide(
+        engine, "Turn up the master bedroom speaker", farmhouse_context
+    )
+    questions = engine.calls[-1]["questions"]
+    assert "target_area" in questions
+    assert "master_bedroom" in questions["target_area"].criteria
+
+    # Porch speaker
+    await strategy.async_decide(engine, "Resume music on the porch", farmhouse_context)
+    questions = engine.calls[-1]["questions"]
+    assert "target_area" in questions
+    assert "wrap_around_porch" in questions["target_area"].criteria
+
+
+async def test_farmhouse_valve_and_cover_candidate_recall(farmhouse_context) -> None:
+    """Test candidate retrieval for valve and cover domains."""
+    strategy = SpeculativeFanOutStrategy()
+    engine = FakeDecisionEngine()
+
+    # Valve: Backyard smart sprinkler system
+    await strategy.async_decide(
+        engine, "Turn on the backyard sprinklers", farmhouse_context
+    )
+    questions = engine.calls[-1]["questions"]
+    assert "valve.smart_sprinkler_system" in questions["target_entity"].criteria
+    assert "HassTurnOn" in questions["intent"].criteria
+
+    # Cover: Open barn garage door
+    await strategy.async_decide(engine, "Open the barn garage door", farmhouse_context)
+    questions = engine.calls[-1]["questions"]
+    assert "cover.barn_garage_door" in questions["target_entity"].criteria
+    assert "HassOpenCover" in questions["intent"].criteria
+
+    # Cover: Close barn garage door
+    await strategy.async_decide(engine, "Shut the barn garage door", farmhouse_context)
+    questions = engine.calls[-1]["questions"]
+    assert "cover.barn_garage_door" in questions["target_entity"].criteria
+    assert "HassCloseCover" in questions["intent"].criteria
+
+    # Cover: Stop moving
+    await strategy.async_decide(
+        engine, "Stop moving the garage door", farmhouse_context
+    )
+    questions = engine.calls[-1]["questions"]
+    assert "cover.barn_garage_door" in questions["target_entity"].criteria
+    assert "HassStopMoving" in questions["intent"].criteria
 
 
 async def test_farmhouse_batch_candidate_recall(

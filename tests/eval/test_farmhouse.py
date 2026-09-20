@@ -129,3 +129,73 @@ async def test_live_farmhouse_out_of_domain_escalation(
     )
 
     assert decision.should_escalate
+
+
+async def test_live_farmhouse_valve_turn_on(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: turn on sprinklers command routes to backyard sprinkler valve."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Turn on the backyard sprinklers", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.intent_name == "HassTurnOn"
+    assert decision.confidence >= 0.30
+
+    is_sprinkler_entity = (
+        decision.slots.get("entity_id") == "valve.smart_sprinkler_system"
+    )
+    is_backyard_area = (decision.slots.get("area") or "").lower() == "backyard"
+    assert (
+        is_sprinkler_entity or is_backyard_area
+    ), f"Unexpected slots: {decision.slots}"
+
+
+async def test_live_farmhouse_media_player_pause(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: pause command routes to family room speaker."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Pause the family room speaker", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.intent_name == "HassMediaPause"
+    assert decision.confidence >= 0.30
+
+    is_family_room = (decision.slots.get("area") or "").lower() in (
+        "family room",
+        "family_room",
+    )
+    is_speaker_entity = decision.slots.get("entity_id") == "media_player.smart_speaker"
+    assert is_family_room or is_speaker_entity, f"Unexpected slots: {decision.slots}"
+
+
+async def test_live_farmhouse_cover_open(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: open garage door command routes to barn garage door cover."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Open the barn garage door", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.intent_name in ("HassOpenCover", "HassTurnOn")
+    assert decision.confidence >= 0.30
+
+    is_garage_entity = decision.slots.get("entity_id") == "cover.barn_garage_door"
+    is_barn_area = (decision.slots.get("area") or "").lower() == "barn"
+    assert is_garage_entity or is_barn_area, f"Unexpected slots: {decision.slots}"
