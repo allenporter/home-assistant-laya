@@ -234,7 +234,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         # Sort descending by score
         scored_intents.sort(key=lambda item: item[0], reverse=True)
 
-        # Select top candidate intents (preferring positively scored intents, leaving 1 slot for "none")
+        # Select top candidate intents (preferring positively scored intents, leaving 1 slot for other)
         max_intents = max(1, MAX_OPTIONS_PER_QUESTION - 1)
         selected_criteria: dict[str, str] = {}
         candidate_supported_slots: set[str] = set()
@@ -251,10 +251,8 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         if not candidate_supported_slots:
             candidate_supported_slots = {"name", "area", "domain", "floor"}
 
-        # Always include "none" for escalation/fallback
-        selected_criteria["none"] = (
-            "Other, query status, or general conversational query"
-        )
+        # Always include fallback option for escalation
+        selected_criteria["other"] = "none of the other options fits"
         return selected_criteria, candidate_supported_slots
 
     def _rank_areas(
@@ -457,16 +455,21 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         intent_ans = answers.get("intent")
         intent_name = (
-            intent_ans.choice if isinstance(intent_ans, ChoiceAnswer) else "none"
+            intent_ans.choice if isinstance(intent_ans, ChoiceAnswer) else "other"
         )
         intent_conf = (
             intent_ans.confidence if isinstance(intent_ans, ChoiceAnswer) else 0.0
         )
+        top_prob = (
+            intent_ans.probabilities.get(intent_name, intent_conf)
+            if isinstance(intent_ans, ChoiceAnswer) and intent_ans.probabilities
+            else intent_conf
+        )
 
-        if intent_name == "none" or intent_conf < self._confidence_threshold:
+        if intent_name in ("other", "none") or top_prob < self._confidence_threshold:
             return Decision(
                 intent_name=None,
-                confidence=intent_conf,
+                confidence=top_prob,
                 is_compound=False,
                 should_escalate=True,
                 escalation_reason="Unhandled intent or low confidence",
@@ -532,7 +535,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         return Decision(
             intent_name=intent_name,
             slots=slots,
-            confidence=intent_conf,
+            confidence=top_prob,
             is_compound=False,
             should_escalate=False,
             active_keys=active_keys,

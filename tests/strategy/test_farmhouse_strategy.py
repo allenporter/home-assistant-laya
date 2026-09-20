@@ -180,7 +180,7 @@ async def test_live_farmhouse_turn_on_kitchen_light(
         assert not decision.should_escalate
         assert not decision.is_compound
         assert decision.intent_name == "HassTurnOn"
-        assert decision.confidence > 0.95
+        assert decision.confidence >= 0.50
         is_kitchen_area_light = (
             decision.slots.get("area") == "kitchen"
             and decision.slots.get("domain") == "light"

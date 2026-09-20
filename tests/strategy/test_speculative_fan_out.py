@@ -306,3 +306,58 @@ async def test_speculative_fan_out_cardinality_limit_enforcement(
 
     ent_q = questions["target_entity"]
     assert len(ent_q.criteria) <= MAX_OPTIONS_PER_QUESTION
+
+
+async def test_speculative_fan_out_escalates_on_other_choice(
+    hass: HomeAssistant,
+) -> None:
+    """Test that choosing 'other' for intent causes an escalation."""
+    context = StrategyContext(
+        hass=hass,
+        area_registry=ar.async_get(hass),
+        entity_registry=er.async_get(hass),
+        states=[State("light.desk_lamp", "on", {"friendly_name": "Desk Lamp"})],
+    )
+
+    engine = FakeDecisionEngine(
+        default_answers={
+            "intent": ChoiceAnswer(choice="other", confidence=0.8),
+            "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
+        }
+    )
+
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(engine, "Tell me a joke", context)
+
+    assert decision.should_escalate
+    assert decision.escalation_reason == "Unhandled intent or low confidence"
+    assert decision.intent_name is None
+
+
+async def test_speculative_fan_out_escalates_on_low_probability(
+    hass: HomeAssistant,
+) -> None:
+    """Test that a winning intent with probability below threshold escalates."""
+    context = StrategyContext(
+        hass=hass,
+        area_registry=ar.async_get(hass),
+        entity_registry=er.async_get(hass),
+        states=[State("light.desk_lamp", "on", {"friendly_name": "Desk Lamp"})],
+    )
+
+    engine = FakeDecisionEngine(
+        default_answers={
+            "intent": ChoiceAnswer(
+                choice="HassTurnOn",
+                confidence=0.5,
+                probabilities={"HassTurnOn": 0.35, "HassTurnOff": 0.33, "other": 0.32},
+            ),
+            "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
+        }
+    )
+
+    strategy = SpeculativeFanOutStrategy(confidence_threshold=0.4)
+    decision = await strategy.async_decide(engine, "Maybe turn on or off", context)
+
+    assert decision.should_escalate
+    assert decision.escalation_reason == "Unhandled intent or low confidence"
