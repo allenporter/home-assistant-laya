@@ -1,8 +1,9 @@
 """Fixtures for the custom component."""
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 import logging
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.const import Platform
@@ -14,7 +15,7 @@ from custom_components.laya.const import (
     CONF_DEVICE,
     DOMAIN,
 )
-from custom_components.laya.engine import FakeDecisionEngine
+from custom_components.laya.engine import FakeDecisionEngine, LocalLayaEngine
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +45,44 @@ def mock_local_engine_fixture(
         return_value=mock_engine,
     ):
         yield mock_engine
+
+
+@pytest.fixture(name="mock_model")
+def mock_model_fixture() -> Generator[MagicMock, None, None]:
+    """Fixture for mocked Laya model."""
+    mock = MagicMock()
+    mock.predict.return_value = {
+        "model": "laya-test",
+        "answers": {"q": {"type": "choice", "choice": "opt1", "confidence": 0.9}},
+    }
+    with patch("laya.load", return_value=mock) as mock_load:
+        mock.mock_load = mock_load
+        yield mock
+
+
+@pytest.fixture(name="mock_load")
+def mock_load_fixture(mock_model: MagicMock) -> MagicMock:
+    """Fixture for mock laya.load."""
+    return mock_model.mock_load
+
+
+@pytest.fixture(name="create_local_engine")
+async def create_local_engine_fixture(
+    mock_load: MagicMock,
+) -> AsyncGenerator[Callable[..., LocalLayaEngine], None]:
+    """Factory fixture for LocalLayaEngine with automatic teardown."""
+    engines: list[LocalLayaEngine] = []
+
+    def _factory(**kwargs: Any) -> LocalLayaEngine:
+        kwargs.setdefault("device", "cpu")
+        engine = LocalLayaEngine(**kwargs)
+        engines.append(engine)
+        return engine
+
+    yield _factory
+
+    for engine in engines:
+        await engine.async_unload()
 
 
 @pytest.fixture(autouse=True)
