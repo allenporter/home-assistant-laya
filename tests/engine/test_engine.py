@@ -100,16 +100,16 @@ async def test_local_engine_eager_load_and_idle_unload() -> None:
     with patch("laya.load", return_value=mock_model) as mock_load:
         engine = LocalLayaEngine(device="cpu", idle_timeout=0.05)
         try:
-            assert engine._agent is None
+            assert not engine.loaded
 
             # Eager load
             await engine.async_load()
-            assert engine._agent is mock_model
+            assert engine.loaded
             assert mock_load.call_count == 1
 
             # Wait for idle timeout to trigger unload
             await asyncio.sleep(0.08)
-            assert engine._agent is None
+            assert not engine.loaded
         finally:
             await engine.async_unload()
 
@@ -130,12 +130,12 @@ async def test_local_engine_predict_keepalive() -> None:
                 "hello", {"q": ChoiceQuestion("test", {"opt1": "1"})}
             )
             assert res.answers["q"].choice == "opt1"
-            assert engine._agent is mock_model
+            assert engine.loaded
             assert mock_load.call_count == 1
 
             # 2. Utterance before idle timeout resets timer
             await asyncio.sleep(0.04)
-            assert engine._agent is mock_model
+            assert engine.loaded
             res2 = await engine.async_predict(
                 "hello again", {"q": ChoiceQuestion("test", {"opt1": "1"})}
             )
@@ -144,14 +144,14 @@ async def test_local_engine_predict_keepalive() -> None:
 
             # 3. Idle timeout expires -> unloaded
             await asyncio.sleep(0.12)
-            assert engine._agent is None
+            assert not engine.loaded
 
             # 4. New prediction reloads model
             res3 = await engine.async_predict(
                 "waking up", {"q": ChoiceQuestion("test", {"opt1": "1"})}
             )
             assert res3.answers["q"].choice == "opt1"
-            assert engine._agent is mock_model
+            assert engine.loaded
             assert mock_load.call_count == 2
         finally:
             await engine.async_unload()
@@ -174,6 +174,6 @@ async def test_local_engine_zero_idle_timeout_unloads_immediately() -> None:
             assert res.answers["q"].choice == "opt1"
             assert mock_load.call_count == 1
             # When idle_timeout is 0, model unloads immediately once prediction finishes
-            assert engine._agent is None
+            assert not engine.loaded
         finally:
             await engine.async_unload()

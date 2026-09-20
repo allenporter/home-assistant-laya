@@ -43,6 +43,11 @@ class LocalLayaEngine(DecisionEngine):
         self._active_consumers: int = 0
         self._idle_timer_cancel: Callable[[], None] | None = None
 
+    @property
+    def loaded(self) -> bool:
+        """Return whether the model is currently loaded in memory."""
+        return self._agent is not None
+
     def _cancel_idle_timer(self) -> None:
         """Cancel any pending idle unload timer."""
         if self._idle_timer_cancel is not None:
