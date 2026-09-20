@@ -91,14 +91,15 @@ async def create_local_engine_fixture(
 
 @pytest.fixture(scope="session", name="require_laya_model")
 def require_laya_model_fixture() -> None:
-    """Ensure Laya model weights are cached locally, or skip slow live tests."""
+    """Ensure Laya model weights are cached locally for live tests."""
     hf_constants.HF_HUB_OFFLINE = True
     os.environ["HF_HUB_OFFLINE"] = "1"
     try:
         snapshot_download("convaiinnovations/laya", local_files_only=True)
-    except Exception:
-        pytest.skip(
-            "Laya model weights not found in local cache. Run './script/download-model' first."
+    except Exception as err:
+        pytest.fail(
+            f"Laya model weights not found in local cache ({err}). "
+            "Run './script/download-model' first."
         )
 
 

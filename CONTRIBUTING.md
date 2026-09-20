@@ -42,7 +42,7 @@ To run the live inference test using the real Laya PyTorch model:
 $ script/test -m slow
 ```
 
-_Note: If the model weights have not been downloaded yet, this test will skip with instructions to run `script/download-model`._
+_Note: If the model weights have not been downloaded yet, this test will fail with instructions to run `script/download-model`._
 
 ## Running Linters & Formatters
 
