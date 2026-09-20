@@ -1,0 +1,131 @@
+"""Live model evaluation tests on the family-farmhouse-us synthetic home dataset."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+import pytest
+from homeassistant.core import HomeAssistant
+
+from custom_components.laya.engine import LocalLayaEngine
+from custom_components.laya.speculative import SpeculativeFanOutStrategy
+from tests.common.fixture_loader import load_synthetic_home_fixtures
+
+pytestmark = pytest.mark.slow
+
+
+@pytest.fixture(name="farmhouse_context")
+def farmhouse_context_fixture(hass: HomeAssistant):
+    """Load the full family farmhouse fixture context."""
+    return load_synthetic_home_fixtures(hass)
+
+
+@pytest.fixture(scope="module", name="live_engine")
+async def live_engine_fixture() -> AsyncGenerator[LocalLayaEngine, None]:
+    """Provide a warm LocalLayaEngine instance across test cases in this module."""
+    engine = LocalLayaEngine(device="cpu", idle_timeout=None)
+    try:
+        await engine.async_load()
+        yield engine
+    finally:
+        await engine.async_unload(force=True)
+
+
+async def test_live_farmhouse_turn_on_kitchen_light(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: turn on light command routes to kitchen light entity or area."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Turn on the Kitchen Light", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.intent_name == "HassTurnOn"
+    assert decision.confidence >= 0.30
+
+    is_kitchen_area_light = (
+        decision.slots.get("area") or ""
+    ).lower() == "kitchen" and decision.slots.get("domain") == "light"
+    is_kitchen_entity = decision.slots.get("entity_id") == "light.kitchen_light"
+    assert (
+        is_kitchen_area_light or is_kitchen_entity
+    ), f"Unexpected slots: {decision.slots}"
+
+
+async def test_live_farmhouse_turn_off_porch_light(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: turn off light command routes to porch light."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Turn off the Porch Light", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.intent_name == "HassTurnOff"
+    assert decision.confidence >= 0.30
+
+    is_porch_entity = decision.slots.get("entity_id") == "light.porch_light"
+    is_porch_area = (decision.slots.get("area") or "").lower() in (
+        "porch",
+        "wrap_around_porch",
+        "wrap-around porch",
+    )
+    assert is_porch_entity or is_porch_area, f"Unexpected slots: {decision.slots}"
+
+
+async def test_live_farmhouse_dim_kitchen_light(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: brightness percentage slot extracted alongside device targeting."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "Set the Kitchen Light to 50% brightness", farmhouse_context
+    )
+
+    assert not decision.should_escalate
+    assert not decision.is_compound
+    assert decision.slots.get("brightness") == 50
+
+    is_kitchen_entity = decision.slots.get("entity_id") == "light.kitchen_light"
+    is_kitchen_area = (decision.slots.get("area") or "").lower() == "kitchen"
+    assert is_kitchen_entity or is_kitchen_area, f"Unexpected slots: {decision.slots}"
+
+
+async def test_live_farmhouse_compound_escalation(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: multi-action compound command triggers escalation."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine,
+        "Turn on the kitchen light and turn off the porch light",
+        farmhouse_context,
+    )
+
+    assert decision.should_escalate
+    assert decision.is_compound or decision.escalation_reason is not None
+
+
+async def test_live_farmhouse_out_of_domain_escalation(
+    farmhouse_context,
+    live_engine: LocalLayaEngine,
+    require_laya_model: None,
+) -> None:
+    """Live inference test: general conversational query not matching home control escalates."""
+    strategy = SpeculativeFanOutStrategy()
+    decision = await strategy.async_decide(
+        live_engine, "What is the capital of France?", farmhouse_context
+    )
+
+    assert decision.should_escalate

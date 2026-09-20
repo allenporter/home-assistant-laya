@@ -9,12 +9,16 @@ from typing import Any
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 
-from ..engine.base import Answer, DecisionEngine
+from ..engine import DecisionEngine
+from ..models import Answer
 
 
 @dataclass(slots=True)
 class StrategyContext:
-    """Home Assistant context passed to decision strategies."""
+    """Home Assistant context passed to decision strategies.
+
+    device_id: Identifier of the originating satellite/voice device, used for room-aware context.
+    """
 
     hass: HomeAssistant
     area_registry: ar.AreaRegistry
@@ -30,6 +34,9 @@ class Decision:
     """Outcome of a decision strategy evaluation."""
 
     intent_name: str | None
+    entity_id: str | None = None
+    area_name: str | None = None
+    domain: str | None = None
     slots: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0
     is_compound: bool = False

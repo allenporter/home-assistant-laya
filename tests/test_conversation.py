@@ -10,12 +10,12 @@ from custom_components.laya.const import (
     CONF_FALLBACK_AGENT,
     DOMAIN,
 )
-from custom_components.laya.engine import (
+from custom_components.laya.speculative import (
     ChoiceAnswer,
-    FakeDecisionEngine,
     NoulAnswer,
     ScoreAnswer,
 )
+from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
 
 
 async def test_turn_on_area(hass: HomeAssistant) -> None:

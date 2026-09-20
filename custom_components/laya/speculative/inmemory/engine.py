@@ -1,30 +1,31 @@
-"""Fake decision engine for testing and simulations."""
+"""In-memory fake decision engine for testing and deterministic evaluation."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .base import (
+from ..engine import DecisionEngine, PredictionResult
+from ..models import (
     Answer,
     ChoiceAnswer,
     ChoiceQuestion,
-    DecisionEngine,
     NoulAnswer,
     NoulQuestion,
-    PredictionResult,
+    Question,
     ScoreAnswer,
     ScoreQuestion,
 )
 
 
 class FakeDecisionEngine(DecisionEngine):
-    """Deterministic, configurable fake decision engine."""
+    """Deterministic, configurable in-memory decision engine."""
 
     def __init__(
         self,
         default_answers: dict[str, Answer] | None = None,
-        custom_handler: Callable[[Any, dict[str, Any]], PredictionResult] | None = None,
+        custom_handler: Callable[[Any, Mapping[str, Question]], PredictionResult]
+        | None = None,
     ) -> None:
         """Initialize FakeDecisionEngine."""
         self._default_answers = default_answers or {}
@@ -43,7 +44,7 @@ class FakeDecisionEngine(DecisionEngine):
     async def async_predict(
         self,
         state: dict[str, Any] | str,
-        questions: Mapping[str, Any],
+        questions: Mapping[str, Question],
     ) -> PredictionResult:
         """Evaluate questions deterministically."""
         self.calls.append({"state": state, "questions": questions})
@@ -54,7 +55,6 @@ class FakeDecisionEngine(DecisionEngine):
         if self._custom_handler:
             return self._custom_handler(state, questions)
 
-        # Fallback: synthesize answers from questions if default answers don't cover them
         answers: dict[str, Answer] = dict(self._default_answers)
         for qid, qdef in questions.items():
             if qid in answers:
@@ -68,16 +68,6 @@ class FakeDecisionEngine(DecisionEngine):
                 answers[qid] = NoulAnswer(noul=0.1, confidence=0.9)
             elif isinstance(qdef, ScoreQuestion):
                 answers[qid] = ScoreAnswer(score=1.0, confidence=0.9)
-            elif isinstance(qdef, dict):
-                qtype = qdef.get("type")
-                if qtype == "choice":
-                    options = list(qdef.get("criteria", {}).keys())
-                    first_opt = options[0] if options else "none"
-                    answers[qid] = ChoiceAnswer(choice=first_opt, confidence=0.9)
-                elif qtype == "noul":
-                    answers[qid] = NoulAnswer(noul=0.1, confidence=0.9)
-                elif qtype == "score":
-                    answers[qid] = ScoreAnswer(score=1.0, confidence=0.9)
 
         return PredictionResult(
             answers=answers,

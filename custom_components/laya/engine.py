@@ -12,14 +12,14 @@ from typing_extensions import override
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 
-from .base import (
+from .speculative.engine import DecisionEngine, PredictionResult
+from .speculative.models import (
     Answer,
     ChoiceAnswer,
     ChoiceQuestion,
-    DecisionEngine,
     NoulAnswer,
     NoulQuestion,
-    PredictionResult,
+    Question,
     ScoreAnswer,
     ScoreQuestion,
 )
@@ -216,7 +216,7 @@ class LocalLayaEngine(DecisionEngine):
     async def async_predict(
         self,
         state: dict[str, Any] | str,
-        questions: Mapping[str, Any],
+        questions: Mapping[str, Question | dict[str, Any]],
     ) -> PredictionResult:
         """Run inference over questions in executor thread."""
         entry = _get_or_create_entry(self._device)
@@ -228,8 +228,23 @@ class LocalLayaEngine(DecisionEngine):
 
             serialized_questions: dict[str, dict[str, Any]] = {}
             for qid, q in questions.items():
-                if isinstance(q, (ChoiceQuestion, NoulQuestion, ScoreQuestion)):
-                    serialized_questions[qid] = q.to_dict()
+                if isinstance(q, ChoiceQuestion):
+                    serialized_questions[qid] = {
+                        "type": "choice",
+                        "instructions": q.instructions,
+                        "criteria": q.criteria,
+                    }
+                elif isinstance(q, NoulQuestion):
+                    serialized_questions[qid] = {
+                        "type": "noul",
+                        "instructions": q.instructions,
+                    }
+                elif isinstance(q, ScoreQuestion):
+                    serialized_questions[qid] = {
+                        "type": "score",
+                        "instructions": q.instructions,
+                        "criteria": q.criteria,
+                    }
                 elif isinstance(q, dict):
                     serialized_questions[qid] = q
                 else:
@@ -255,29 +270,41 @@ class LocalLayaEngine(DecisionEngine):
         answers: dict[str, Answer] = {}
 
         for qid, ans_data in raw_answers.items():
+            if not isinstance(ans_data, dict):
+                continue
             qtype = ans_data.get("type")
             conf = float(ans_data.get("confidence", 0.0))
             action = ans_data.get("action", {})
             if qtype == "choice":
+                raw_choice = ans_data.get("choice")
+                choice_val = "" if raw_choice is None else str(raw_choice)
                 answers[qid] = ChoiceAnswer(
-                    choice=ans_data.get("choice", ""),
+                    choice=choice_val,
                     confidence=conf,
-                    probabilities=ans_data.get("probabilities", {}),
-                    action=action,
+                    probabilities={
+                        str(k): float(v)
+                        for k, v in ans_data.get("probabilities", {}).items()
+                    },
+                    action=action if isinstance(action, dict) else {},
                 )
             elif qtype == "noul":
                 answers[qid] = NoulAnswer(
                     noul=float(ans_data.get("noul", 0.0)),
                     confidence=conf,
-                    action=action,
+                    action=action if isinstance(action, dict) else {},
                 )
             elif qtype == "score":
                 answers[qid] = ScoreAnswer(
                     score=float(ans_data.get("score", 0.0)),
                     confidence=conf,
-                    probabilities=ans_data.get("probabilities", {}),
-                    legend=ans_data.get("legend", {}),
-                    action=action,
+                    probabilities={
+                        str(k): float(v)
+                        for k, v in ans_data.get("probabilities", {}).items()
+                    },
+                    legend={
+                        str(k): str(v) for k, v in ans_data.get("legend", {}).items()
+                    },
+                    action=action if isinstance(action, dict) else {},
                 )
 
         return PredictionResult(
@@ -308,3 +335,10 @@ class LocalLayaEngine(DecisionEngine):
             return
 
         await entry.async_unload()
+
+
+__all__ = [
+    "LocalLayaEngine",
+    "async_unload_all_models",
+    "get_loaded_models",
+]

@@ -19,7 +19,7 @@ from .const import (
 )
 from .engine import LocalLayaEngine
 from .models import LayaConfigEntry, LayaData
-from .strategy import SpeculativeFanOutStrategy
+from .speculative import SpeculativeFanOutStrategy
 
 _LOGGER = logging.getLogger(__name__)
 

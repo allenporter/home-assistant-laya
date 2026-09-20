@@ -18,9 +18,8 @@ from homeassistant.helpers import (
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_FALLBACK_AGENT, DOMAIN
-from .engine.base import DecisionEngine
 from .models import LayaConfigEntry
-from .strategy.base import DecisionStrategy, StrategyContext
+from .speculative import DecisionEngine, DecisionStrategy, StrategyContext
 
 _LOGGER = logging.getLogger(__name__)
 

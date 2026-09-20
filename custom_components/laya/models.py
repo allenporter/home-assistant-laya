@@ -6,8 +6,7 @@ from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
 
-from .engine.base import DecisionEngine
-from .strategy.base import DecisionStrategy
+from .speculative import DecisionEngine, DecisionStrategy
 
 type LayaConfigEntry = ConfigEntry[LayaData]
 

@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.laya.engine import ChoiceQuestion, LocalLayaEngine
+from custom_components.laya.engine import LocalLayaEngine
+from custom_components.laya.speculative.models import ChoiceQuestion
 
 TEST_QUESTIONS = {"q": ChoiceQuestion("test", {"opt1": "1"})}
 
