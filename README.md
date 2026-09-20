@@ -70,10 +70,8 @@ Notice that the `light_action` question is asked _before_ the model even knows i
 
 - **Respects Assist Exposure**: Only considers devices and areas explicitly exposed under _Expose to Assist_.
 - **Dynamic HA Intent Introspection**: Inspects Home Assistant's registered `IntentHandler`s and slot schemas to only prompt intents the strategy can fulfill.
-- **Calibrated Confidence**: Choice confidence is calibrated across candidate set size $N$ using the dispersion formula:
-  $$\text{confidence} = \max\left(0, \min\left(1, \frac{N \times p_{\max} - 1}{N - 1}\right)\right)$$
-  Uniform uncertainty ($p_{\max} = 1/N$) maps to `0.0`, while complete certainty maps to `1.0`, ensuring candidates are not penalized by softmax dilution.
-- **Closed-Set Routing**: Intent questions strictly evaluate registered Home Assistant intents without artificial fallback options. Unhandled or out-of-domain requests naturally produce diffuse probability distributions that drop below threshold and escalate.
+- **Calibrated Confidence**: Choice confidence is normalized across candidate set size $N$ ($\frac{N \cdot p_{\max} - 1}{N - 1}$), scaling from 0.0 (uniform uncertainty) to 1.0 (certainty) so options aren't penalized when choosing among many devices.
+- **Closed-Set Intent Routing**: Questions evaluate registered Home Assistant intents directly. Unsupported requests or conversational chatter produce low-confidence distributions that escalate to the fallback agent.
 - **Instant Numeric Extraction**: Deterministic regex extractors instantly pull out target percentages and temperatures (e.g., _"set thermostat to 68 degrees"_ $\to$ `68.0`).
 
 ---
@@ -92,48 +90,6 @@ Configure Laya in the Home Assistant UI or programmatically via config entry opt
 
 ---
 
-## Benchmarks & Evaluation
-
-When benchmarking large test sets, set `idle_timeout: 60.0` to keep model weights warm in memory across predictions instead of reloading on each sentence:
-
-```python
-from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-from custom_components.laya.const import (
-    CONF_COMPOUND_THRESHOLD,
-    CONF_CONFIDENCE_THRESHOLD,
-    CONF_DEVICE,
-    CONF_FALLBACK_AGENT,
-    CONF_IDLE_TIMEOUT,
-    DOMAIN,
-)
-
-
-async def setup_laya_for_eval(hass: HomeAssistant) -> MockConfigEntry:
-    """Create and set up a warm Laya entry for evaluation."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Laya (Benchmark)",
-        data={
-            CONF_DEVICE: "auto",  # or "cuda" / "mps" / "cpu"
-            CONF_IDLE_TIMEOUT: 60.0,  # Preload and keep weights warm
-        },
-        options={
-            CONF_IDLE_TIMEOUT: 60.0,
-            CONF_COMPOUND_THRESHOLD: 0.65,
-            CONF_CONFIDENCE_THRESHOLD: 0.30,
-            CONF_FALLBACK_AGENT: "conversation.home_assistant",
-        },
-    )
-    entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    return entry
-```
-
----
-
 ## Contributing
 
-For instructions on setting up your development environment, downloading model weights, running the test suite, and linting, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For instructions on setting up your development environment, downloading model weights, running tests, benchmarks, and linting, see [CONTRIBUTING.md](CONTRIBUTING.md).
