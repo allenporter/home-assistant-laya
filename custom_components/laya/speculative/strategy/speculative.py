@@ -8,9 +8,12 @@ from typing import Any
 
 from homeassistant.helpers import intent
 
-from ..engine import DecisionEngine
+from ..engine import DecisionEngine, PredictionResult
 from ..models import (
+    Answer,
+    ChoiceAnswer,
     ChoiceQuestion,
+    NoulAnswer,
     NoulQuestion,
     Question,
 )
@@ -73,7 +76,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         states = context.states if context.states is not None else []
         for state in states:
-            domain = getattr(state, "domain", None)
+            domain = state.domain
             if not domain or domain not in target_domains:
                 continue
 
@@ -150,44 +153,25 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         return criteria
 
     @staticmethod
-    def _safe_choice(answers: dict[str, Any], key: str) -> str | None:
+    def _safe_choice(answers: dict[str, Answer], key: str) -> str | None:
         """Safely extract string choice from answer primitive."""
-        primitive = answers.get(key)
-        if primitive is None:
-            return None
-        if hasattr(primitive, "choice"):
-            val = getattr(primitive, "choice")
-            return str(val) if val is not None else None
-        if isinstance(primitive, dict):
-            choice = primitive.get("choice")
-            if isinstance(choice, str):
-                return choice
+        answer = answers.get(key)
+        if isinstance(answer, ChoiceAnswer) and answer.choice:
+            return answer.choice
         return None
-
-    @staticmethod
-    def _safe_float(val: Any, default: float = 0.0) -> float:
-        """Safely convert value to float, defaulting on None or invalid input."""
-        if val is None:
-            return default
-        if isinstance(val, (int, float)):
-            return float(val)
-        if isinstance(val, str):
-            try:
-                return float(val)
-            except ValueError:
-                return default
-        return default
 
     def _parse_evaluation_response(
         self,
-        response: Any,
+        response: PredictionResult,
         utterance: str,
         context: StrategyContext,
     ) -> Decision:
-        """Safely parse and validate engine evaluation response or PredictionResult."""
-        if not isinstance(response, dict) and not hasattr(response, "answers"):
+        """Safely parse and validate engine PredictionResult."""
+        if not isinstance(response, PredictionResult) or not isinstance(
+            response.answers, dict
+        ):
             _LOGGER.warning(
-                "Decision engine evaluation returned non-dict response (%s): %r",
+                "Decision engine evaluation returned non-PredictionResult response (%s): %r",
                 type(response).__name__,
                 response,
             )
@@ -195,39 +179,17 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
                 intent_name=None,
                 confidence=0.0,
                 should_escalate=True,
-                escalation_reason="Malformed engine response: expected JSON object",
+                escalation_reason="Malformed engine response: expected PredictionResult",
             )
 
-        raw_answers: Any = None
-        if hasattr(response, "answers"):
-            raw_answers = getattr(response, "answers")
-        elif isinstance(response, dict):
-            raw_answers = response.get("answers")
-
-        if not isinstance(raw_answers, dict):
-            _LOGGER.warning(
-                "Decision engine response missing or non-dict 'answers' object: %r",
-                response,
-            )
-            return Decision(
-                intent_name=None,
-                confidence=0.0,
-                should_escalate=True,
-                escalation_reason="Malformed engine response: missing answers dictionary",
-            )
-
-        answers: dict[str, Any] = raw_answers
+        answers = response.answers
 
         # 1. Check compound command condition safely
         compound_ans = answers.get("is_compound")
-        compound_noul = 0.0
-        if compound_ans is not None:
-            if hasattr(compound_ans, "noul"):
-                compound_noul = self._safe_float(getattr(compound_ans, "noul"), 0.0)
-            elif isinstance(compound_ans, dict):
-                compound_noul = self._safe_float(compound_ans.get("noul"), 0.0)
-
-        if compound_noul > self._compound_threshold:
+        if (
+            isinstance(compound_ans, NoulAnswer)
+            and compound_ans.noul > self._compound_threshold
+        ):
             return Decision(
                 intent_name=None,
                 confidence=0.0,
@@ -239,9 +201,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         # 2. Check intent choice and confidence safely
         intent_ans = answers.get("intent")
-        if intent_ans is None or (
-            not isinstance(intent_ans, dict) and not hasattr(intent_ans, "choice")
-        ):
+        if not isinstance(intent_ans, ChoiceAnswer):
             _LOGGER.warning(
                 "Response missing or invalid 'intent' answer: %r", intent_ans
             )
@@ -253,34 +213,12 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
                 raw_answers=answers,
             )
 
-        raw_choice = (
-            getattr(intent_ans, "choice")
-            if hasattr(intent_ans, "choice")
-            else intent_ans.get("choice")
+        intent_choice = intent_ans.choice if intent_ans.choice else None
+        top_prob = (
+            intent_ans.probabilities.get(intent_choice, intent_ans.confidence)
+            if intent_choice
+            else intent_ans.confidence
         )
-        intent_choice = (
-            str(raw_choice) if isinstance(raw_choice, str) and raw_choice else None
-        )
-        intent_conf = self._safe_float(
-            getattr(intent_ans, "confidence")
-            if hasattr(intent_ans, "confidence")
-            else intent_ans.get("confidence"),
-            0.0,
-        )
-
-        raw_probs = (
-            getattr(intent_ans, "probabilities")
-            if hasattr(intent_ans, "probabilities")
-            else intent_ans.get("probabilities")
-        )
-        probabilities: dict[str, float] = {}
-        if isinstance(raw_probs, dict):
-            for k, v in raw_probs.items():
-                probabilities[str(k)] = self._safe_float(v, 0.0)
-
-        top_prob = intent_conf
-        if intent_choice and intent_choice in probabilities:
-            top_prob = probabilities[intent_choice]
 
         if (
             not intent_choice
