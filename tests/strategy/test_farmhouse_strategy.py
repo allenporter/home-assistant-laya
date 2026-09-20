@@ -93,7 +93,6 @@ async def test_farmhouse_decision_routing(
     engine = FakeDecisionEngine(
         default_answers={
             "intent": ChoiceAnswer(choice="HassTurnOn", confidence=0.96),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.92),
             "target_domain": ChoiceAnswer(choice="light", confidence=0.95),
             "target_entity": ChoiceAnswer(
                 choice="light.kitchen_light", confidence=0.98
@@ -180,7 +179,7 @@ async def test_live_farmhouse_turn_on_kitchen_light(
         assert not decision.should_escalate
         assert not decision.is_compound
         assert decision.intent_name == "HassTurnOn"
-        assert decision.confidence >= 0.50
+        assert decision.confidence >= 0.30
         is_kitchen_area_light = (
             decision.slots.get("area") == "kitchen"
             and decision.slots.get("domain") == "light"
@@ -188,4 +187,4 @@ async def test_live_farmhouse_turn_on_kitchen_light(
         is_kitchen_entity = decision.slots.get("entity_id") == "light.kitchen_light"
         assert is_kitchen_area_light or is_kitchen_entity
     finally:
-        await engine.async_unload()
+        await engine.async_unload(force=True)

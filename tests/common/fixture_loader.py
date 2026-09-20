@@ -86,14 +86,14 @@ STANDARD_INTENT_CONFIGS: list[
 ] = [
     (
         "HassTurnOn",
-        "Turns on or opens a device, light, switch, or appliance. Use for requests like 'turn on', 'activate', or 'open'.",
+        "Turn on or activate device, light, or appliance",
         {"light", "switch", "fan", "cover", "media_player", "climate", "valve"},
         {"name", "area", "floor", "domain"},
         None,
     ),
     (
         "HassTurnOff",
-        "Turns off or closes a device, light, switch, or appliance. Use for requests like 'turn off', 'deactivate', or 'close'.",
+        "Turn off or stop device, light, or appliance",
         {"light", "switch", "fan", "cover", "media_player", "climate", "valve"},
         {"name", "area", "floor", "domain"},
         None,

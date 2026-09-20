@@ -30,6 +30,24 @@ SUPPORTED_STRATEGY_SLOTS: frozenset[str] = frozenset(
     {"name", "area", "domain", "floor", "device_class", "brightness"}
 )
 
+CANONICAL_INTENT_DESCRIPTIONS: dict[str, str] = {
+    "HassTurnOn": "Turn on or activate a device, light, or appliance",
+    "HassTurnOff": "Turn off or deactivate a device, light, or appliance",
+    "HassToggle": "Toggle a device on or off",
+    "HassLightSet": "Set brightness, dim, or change color of lights",
+}
+
+
+def calculate_choice_confidence(p_max: float, num_options: int) -> float:
+    """Calibrate choice confidence across N options based on dispersion from uniform.
+
+    When p_max = 1 / num_options (uniform distribution / total uncertainty),
+    confidence is 0.0. When p_max = 1.0 (certainty), confidence is 1.0.
+    """
+    if num_options <= 1:
+        return 1.0 if p_max > 0.0 else 0.0
+    return max(0.0, min(1.0, (num_options * p_max - 1.0) / (num_options - 1.0)))
+
 
 def get_handler_slot_info(
     handler: intent.IntentHandler,
@@ -209,12 +227,17 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
             ):
                 continue
 
-            # Read metadata directly from the Home Assistant IntentHandler
-            desc = (
-                getattr(handler, "description", None)
-                or handler.__doc__
-                or f"Handle {it_name.replace('Hass', '').strip()}"
-            )
+            # Read metadata directly from the Home Assistant IntentHandler, preferring concise canonical descriptions
+            desc = CANONICAL_INTENT_DESCRIPTIONS.get(it_name)
+            if not desc:
+                raw_desc = (
+                    getattr(handler, "description", None)
+                    or handler.__doc__
+                    or f"Handle {it_name.replace('Hass', '').strip()}"
+                )
+                desc = raw_desc.split(". ")[0].strip()
+                if not desc.endswith("."):
+                    desc += "."
 
             # Score intent against query tokens using the intent description and name
             desc_score = _lexical_score(query_tokens, desc, full_query)
@@ -227,15 +250,15 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         # Fallback if no handlers were registered in Home Assistant
         if not scored_intents:
             scored_intents = [
-                (1.0, "HassTurnOn", "Turn on or activate device"),
-                (1.0, "HassTurnOff", "Turn off or deactivate device"),
+                (1.0, "HassTurnOn", CANONICAL_INTENT_DESCRIPTIONS["HassTurnOn"]),
+                (1.0, "HassTurnOff", CANONICAL_INTENT_DESCRIPTIONS["HassTurnOff"]),
             ]
 
         # Sort descending by score
         scored_intents.sort(key=lambda item: item[0], reverse=True)
 
-        # Select top candidate intents (preferring positively scored intents, leaving 1 slot for other)
-        max_intents = max(1, MAX_OPTIONS_PER_QUESTION - 1)
+        # Select top candidate intents (capped to top 4)
+        max_intents = 4
         selected_criteria: dict[str, str] = {}
         candidate_supported_slots: set[str] = set()
 
@@ -248,11 +271,26 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
                 supp, _ = get_handler_slot_info(handlers_by_name[it_name])
                 candidate_supported_slots.update(supp)
 
+        # If no positive scored intents, fall back to standard control intents
+        if not positive_intents:
+            for it_name in ("HassTurnOn", "HassTurnOff"):
+                if (
+                    it_name in handlers_by_name
+                    and it_name not in selected_criteria
+                    and len(selected_criteria) < max_intents
+                ):
+                    desc = (
+                        CANONICAL_INTENT_DESCRIPTIONS.get(it_name)
+                        or getattr(handlers_by_name[it_name], "description", None)
+                        or f"Handle {it_name.replace('Hass', '')}"
+                    )
+                    selected_criteria[it_name] = desc
+                    supp, _ = get_handler_slot_info(handlers_by_name[it_name])
+                    candidate_supported_slots.update(supp)
+
         if not candidate_supported_slots:
             candidate_supported_slots = {"name", "area", "domain", "floor"}
 
-        # Always include fallback option for escalation
-        selected_criteria["other"] = "none of the other options fits"
         return selected_criteria, candidate_supported_slots
 
     def _rank_areas(
@@ -362,52 +400,48 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         questions: dict[str, Question] = {
             "intent": ChoiceQuestion(
-                instructions="Determine the primary Home Assistant action",
+                instructions="What action or command is the user asking Home Assistant to perform on their smart home devices?",
                 criteria=intent_criteria,
             ),
             "is_compound": NoulQuestion(
-                instructions="Does the request contain multiple distinct commands or conjunctions?"
+                instructions="Does the user request contain multiple distinct instructions or commands to perform?"
             ),
         }
 
-        # Dynamically determine target scope options supported by candidate intents
+        # Dynamically determine target scope options (entity vs area)
         target_type_criteria: dict[str, str] = {}
-        if "name" in candidate_supported_slots:
+        if "name" in candidate_supported_slots and entity_criteria:
             target_type_criteria["entity"] = "A specific individual device or appliance"
-        if "area" in candidate_supported_slots:
+        if "area" in candidate_supported_slots and area_criteria:
             target_type_criteria["area"] = "An entire room or area"
-        if "domain" in candidate_supported_slots:
-            target_type_criteria["domain_all"] = (
-                "All devices of a domain across the home"
-            )
 
         if len(target_type_criteria) > 1:
             questions["target_type"] = ChoiceQuestion(
-                instructions="What scope is targeted?",
+                instructions="What scope of device or area in the home is targeted by the user command?",
                 criteria=target_type_criteria,
             )
 
         if "domain" in candidate_supported_slots and domain_criteria:
             questions["target_domain"] = ChoiceQuestion(
-                instructions="What device domain is targeted?",
+                instructions="Which type or category of smart home device is targeted by the user command?",
                 criteria=domain_criteria,
             )
 
         if "area" in candidate_supported_slots and area_criteria:
             questions["target_area"] = ChoiceQuestion(
-                instructions="Which area is mentioned?",
+                instructions="Which room or physical area of the home is mentioned in the user request?",
                 criteria=area_criteria,
             )
 
         if "name" in candidate_supported_slots and entity_criteria:
             questions["target_entity"] = ChoiceQuestion(
-                instructions="Which specific device is targeted?",
+                instructions="Which specific smart home device, light, switch, or appliance mentioned in the user request should be operated?",
                 criteria=entity_criteria,
             )
 
         if "light" in active_domains:
             questions["light_action"] = ChoiceQuestion(
-                instructions="Action for lights",
+                instructions="What specific adjustment should be made to the light?",
                 criteria={
                     "turn_off": "Turn lights off",
                     "turn_on": "Turn lights on",
@@ -457,19 +491,41 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         intent_name = (
             intent_ans.choice if isinstance(intent_ans, ChoiceAnswer) else "other"
         )
-        intent_conf = (
+        raw_conf = (
             intent_ans.confidence if isinstance(intent_ans, ChoiceAnswer) else 0.0
         )
-        top_prob = (
-            intent_ans.probabilities.get(intent_name, intent_conf)
-            if isinstance(intent_ans, ChoiceAnswer) and intent_ans.probabilities
-            else intent_conf
-        )
+        calibrated_conf = raw_conf
 
-        if intent_name in ("other", "none") or top_prob < self._confidence_threshold:
+        # Calibrate confidence using dispersion across candidate options
+        if isinstance(intent_ans, ChoiceAnswer) and intent_ans.probabilities:
+            registered_probs = {
+                k: v
+                for k, v in intent_ans.probabilities.items()
+                if k not in ("other", "none")
+            }
+            if registered_probs:
+                best_intent, best_prob = max(
+                    registered_probs.items(), key=lambda item: item[1]
+                )
+                num_opts = len(intent_ans.probabilities)
+                calibrated_conf = calculate_choice_confidence(best_prob, num_opts)
+                if (
+                    intent_name in ("other", "none")
+                    and calibrated_conf >= self._confidence_threshold
+                ):
+                    intent_name = best_intent
+                elif intent_name == best_intent:
+                    pass
+            else:
+                calibrated_conf = 0.0
+
+        if (
+            intent_name in ("other", "none")
+            or calibrated_conf < self._confidence_threshold
+        ):
             return Decision(
                 intent_name=None,
-                confidence=top_prob,
+                confidence=calibrated_conf,
                 is_compound=False,
                 should_escalate=True,
                 escalation_reason="Unhandled intent or low confidence",
@@ -498,18 +554,31 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
 
         slots: dict[str, Any] = {}
 
-        if target_type == "area" and "target_area" in answers:
+        if (
+            target_type == "area"
+            and "target_area" in answers
+            and isinstance(answers["target_area"], ChoiceAnswer)
+        ):
             area_ans = answers["target_area"]
-            if isinstance(area_ans, ChoiceAnswer):
-                active_keys.add("target_area")
-                slots["area"] = area_ans.choice
+            slots["area"] = area_ans.choice
+            if domain:
                 slots["domain"] = domain
-        elif target_type == "entity" and "target_entity" in answers:
+            active_keys.add("target_area")
+        elif "target_entity" in answers and isinstance(
+            answers["target_entity"], ChoiceAnswer
+        ):
             entity_ans = answers["target_entity"]
-            if isinstance(entity_ans, ChoiceAnswer):
-                active_keys.add("target_entity")
-                slots["entity_id"] = entity_ans.choice
-        elif target_type == "domain_all":
+            slots["entity_id"] = entity_ans.choice
+            active_keys.add("target_entity")
+        elif "target_area" in answers and isinstance(
+            answers["target_area"], ChoiceAnswer
+        ):
+            area_ans = answers["target_area"]
+            slots["area"] = area_ans.choice
+            if domain:
+                slots["domain"] = domain
+            active_keys.add("target_area")
+        elif domain:
             slots["domain"] = domain
 
         # Slot filling heuristics for domains
@@ -535,7 +604,7 @@ class SpeculativeFanOutStrategy(DecisionStrategy):
         return Decision(
             intent_name=intent_name,
             slots=slots,
-            confidence=top_prob,
+            confidence=calibrated_conf,
             is_compound=False,
             should_escalate=False,
             active_keys=active_keys,

@@ -1,5 +1,6 @@
 """Tests for speculative fan-out decision strategy."""
 
+import pytest
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import area_registry as ar, entity_registry as er, intent
 
@@ -9,7 +10,11 @@ from custom_components.laya.engine import (
     FakeDecisionEngine,
     NoulAnswer,
 )
-from custom_components.laya.strategy import SpeculativeFanOutStrategy, StrategyContext
+from custom_components.laya.strategy import (
+    SpeculativeFanOutStrategy,
+    StrategyContext,
+    calculate_choice_confidence,
+)
 from tests.common.fixture_loader import DummyIntentHandler
 
 
@@ -68,7 +73,6 @@ async def test_speculative_fan_out_entity_turn_off(hass: HomeAssistant) -> None:
     engine = FakeDecisionEngine(
         default_answers={
             "intent": ChoiceAnswer(choice="HassTurnOff", confidence=0.91),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.9),
             "target_domain": ChoiceAnswer(choice="light", confidence=0.95),
             "target_entity": ChoiceAnswer(choice="light.desk_lamp", confidence=0.96),
             "is_compound": NoulAnswer(noul=0.01, confidence=0.99),
@@ -195,7 +199,6 @@ async def test_speculative_fan_out_brightness_numeric_extraction(
     engine = FakeDecisionEngine(
         default_answers={
             "intent": ChoiceAnswer(choice="HassTurnOn", confidence=0.96),
-            "target_type": ChoiceAnswer(choice="entity", confidence=0.9),
             "target_domain": ChoiceAnswer(choice="light", confidence=0.95),
             "target_entity": ChoiceAnswer(
                 choice="light.kitchen_ceiling", confidence=0.95
@@ -361,3 +364,50 @@ async def test_speculative_fan_out_escalates_on_low_probability(
 
     assert decision.should_escalate
     assert decision.escalation_reason == "Unhandled intent or low confidence"
+
+
+def test_calculate_choice_confidence_calibration() -> None:
+    """Test TypeSafe dispersion formula for choice confidence across N options."""
+    # N = 1 option
+    assert calculate_choice_confidence(1.0, 1) == 1.0
+    assert calculate_choice_confidence(0.0, 1) == 0.0
+
+    # N = 2 options
+    # Uniform noise (p = 0.5) -> confidence 0.0
+    assert calculate_choice_confidence(0.5, 2) == pytest.approx(0.0)
+    # Certainty (p = 1.0) -> confidence 1.0
+    assert calculate_choice_confidence(1.0, 2) == pytest.approx(1.0)
+    # Halfway (p = 0.75) -> confidence 0.5
+    assert calculate_choice_confidence(0.75, 2) == pytest.approx(0.5)
+
+    # N = 4 options
+    # Uniform noise (p = 0.25) -> confidence 0.0
+    assert calculate_choice_confidence(0.25, 4) == pytest.approx(0.0)
+    # Complete certainty (p = 1.0) -> confidence 1.0
+    assert calculate_choice_confidence(1.0, 4) == pytest.approx(1.0)
+    # Dominant winner (p = 0.70) -> confidence (4 * 0.70 - 1) / 3 = 0.60
+    assert calculate_choice_confidence(0.70, 4) == pytest.approx(0.60)
+    # Bounded between 0.0 and 1.0
+    assert calculate_choice_confidence(0.10, 4) == 0.0
+
+
+async def test_speculative_fan_out_criteria_omits_artificial_other(
+    hass: HomeAssistant,
+) -> None:
+    """Test that candidate intent questions do not include artificial 'other' option."""
+    context = StrategyContext(
+        hass=hass,
+        area_registry=ar.async_get(hass),
+        entity_registry=er.async_get(hass),
+        states=[State("light.desk_lamp", "on", {"friendly_name": "Desk Lamp"})],
+    )
+    engine = FakeDecisionEngine()
+    strategy = SpeculativeFanOutStrategy()
+
+    await strategy.async_decide(engine, "Turn on the desk lamp", context)
+    assert len(engine.calls) == 1
+    intent_q = engine.calls[0]["questions"]["intent"]
+
+    assert "other" not in intent_q.criteria
+    assert "HassTurnOn" in intent_q.criteria
+    assert "What action or command is the user asking" in intent_q.instructions
