@@ -43,6 +43,8 @@ def empty_context_fixture() -> MagicMock:
     context = MagicMock(spec=StrategyContext)
     context.home_name = "My Home"
     context.area_registry.async_list_areas.return_value = []
+    context.area_registry.async_get_area.return_value = None
+    context.entity_registry.async_get.return_value = None
     context.states = []
     return context
 
@@ -263,7 +265,6 @@ async def test_intent_driven_domain_filtering(empty_context: MagicMock) -> None:
     assert info_domains == set(ONOFF_DOMAINS)
 
     # 4. Entity ranking respects allowed_domains
-    empty_context.entity_registry.async_get.return_value = None
     mock_light = MagicMock(
         domain="light", entity_id="light.kitchen", name="Kitchen Light"
     )

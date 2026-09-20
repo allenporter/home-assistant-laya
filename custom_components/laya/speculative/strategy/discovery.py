@@ -329,7 +329,7 @@ def rank_entities(
         area_name: str | None = None
         if entry and entry.area_id:
             area_entry = context.area_registry.async_get_area(entry.area_id)
-            if area_entry and isinstance(area_entry.name, str):
+            if area_entry:
                 area_name = area_entry.name
 
         base_score = lexical_score(
