@@ -2,6 +2,9 @@
 
 A fast, fully local conversation agent for [Home Assistant Assist](https://www.home-assistant.io/voice_control/) powered by the open-weight [Laya](https://huggingface.co/collections/laya) decision engine.
 
+> [!NOTE]
+> Looking for a cloud-accelerated version? See its sibling project [**home-assistant-jev**](https://github.com/allenporter/home-assistant-jev), powered by TypeSafe AI's hosted Jev API. Both integrations share the same 5-stage speculative decision pipeline architecture.
+
 Laya is a lightweight, non-autoregressive decision model that evaluates structured choices in a single forward pass. It integrates directly as a native **Conversation Agent** in Home Assistant Assist voice pipelines—dispatching routine device control commands directly with zero cloud reliance, while seamlessly escalating compound or open-ended conversational queries to a configured fallback LLM.
 
 Instead of generating free-form text token-by-token and parsing the output back into code, Laya scores the probability of registered Home Assistant intents and exposed entities directly in a single pass.
