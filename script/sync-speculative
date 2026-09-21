@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 #
 # Synchronize the speculative decision engine and its unit tests
-# bidirectionally between Home Assistant integrations (e.g. Laya <-> Jev / TypeSafe).
+# from another Home Assistant integration (e.g. pulling from Jev / TypeSafe into Laya).
 #
 # Usage:
 #   ./script/sync-speculative <source_repo> [dest_repo]
 #
 # Examples:
-#   # Sync from Jev into current repo (Laya):
+#   # Pull from Jev into current repo:
 #   ./script/sync-speculative /workspaces/home-assistant-jev
 #
-#   # Sync from current repo (Laya) into Jev:
-#   ./script/sync-speculative . /workspaces/home-assistant-jev
+# Note: Always pull into your own repository. Do not push into other repositories.
 
 set -euo pipefail
 
