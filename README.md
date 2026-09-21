@@ -17,16 +17,24 @@ Instead of generating free-form text token-by-token and parsing the output back 
 
 ## Performance & Hardware
 
-Because Laya is non-autoregressive, questions are evaluated concurrently in a single forward pass rather than generating words sequentially. Inference latency depends on hardware architecture and batch size:
+Because Laya is non-autoregressive, multiple decision questions are evaluated concurrently in a single forward pass rather than generating tokens sequentially.
 
-| Hardware                             | Questions Evaluated    | Reported Latency  | Notes                                                                  |
-| :----------------------------------- | :--------------------- | :---------------- | :--------------------------------------------------------------------- |
-| **GPU (NVIDIA T4 / CUDA)**           | 1 question             | ~33 ms – 40 ms    | [Model Card Benchmarks](https://huggingface.co/convaiinnovations/laya) |
-| **GPU (NVIDIA T4 / CUDA)**           | 10 questions (batched) | ~72 ms – 159 ms   | Concurrent speculative fan-out                                         |
-| **Apple Silicon (M-series MPS/MLX)** | 1–10 questions         | ~50 ms – 140 ms   | Accelerated unified memory inference                                   |
-| **Standard CPU (x86_64 / ARM)**      | Multi-question batch   | ~200 ms – 500 ms+ | Scales with CPU core count & AVX/SIMD capabilities                     |
+### Model Benchmarks vs. Real-World Smart Home Latency
 
-_Note: Initial model load incurs a warm-up phase. For production use, hardware acceleration (CUDA, Apple Silicon Metal/MPS) provides the most responsive voice assistant experience._
+The [Laya model card](https://huggingface.co/convaiinnovations/laya) reports per-instruction microbenchmarks with short prompts and small option sets:
+
+- **GPU (NVIDIA T4)**: ~33 ms (1 question) to ~72–159 ms (10 batched questions).
+- **CPU (Synthetic isolated questions)**: ~250 ms – 400 ms.
+
+In Home Assistant Assist, however, total latency depends heavily on **context size**. Every inference includes the user's spoken utterance, exposed entity states, area registries, handler descriptions, and speculative candidate target sets. On CPU, evaluating self-attention across this richer context scales execution time:
+
+| Hardware                        | Isolated Microbenchmark (Minimal Context) | Real-World Assist Pipeline (Full Home Context) | Notes                                            |
+| :------------------------------ | :---------------------------------------- | :--------------------------------------------- | :----------------------------------------------- |
+| **GPU (NVIDIA CUDA)**           | ~35 ms – 80 ms                            | **~100 ms – 250 ms**                           | Fast matrix parallelism on batched attention     |
+| **Apple Silicon (Metal / MPS)** | ~50 ms – 100 ms                           | **~150 ms – 350 ms**                           | Accelerated unified memory inference             |
+| **Standard CPU (x86_64 / ARM)** | ~250 ms – 400 ms                          | **~1.5 s – 3.0 s**                             | Scales with exposed entity count and CPU threads |
+
+_Tip: For the most responsive voice experience, running with hardware acceleration (CUDA or Apple Silicon Metal/MPS) delivers sub-second turnarounds._
 
 ## How It Works
 
