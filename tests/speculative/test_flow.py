@@ -12,20 +12,11 @@ from homeassistant.helpers import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.laya.const import (
-    CONF_COMPOUND_THRESHOLD,
-    CONF_CONFIDENCE_THRESHOLD,
-    CONF_DOMAIN_FILTER_MODE,
-    CONF_RETRIEVER_TYPE,
-    DEFAULT_COMPOUND_THRESHOLD,
-    DEFAULT_CONFIDENCE_THRESHOLD,
-)
 from custom_components.laya.speculative.context import DecisionContext
 from custom_components.laya.speculative.flow import (
     DecisionFlow,
     create_decision_flow,
     create_exhaustive_flow,
-    create_flow_from_options,
     create_simple_flow,
 )
 from custom_components.laya.speculative.hydration.hierarchical import (
@@ -147,17 +138,23 @@ async def test_flow_custom_stage_injection(
 
 def test_flow_factory_configurations() -> None:
     """Test creating decision flows with various configurations."""
-    standard_flow = create_decision_flow(domain_filter_mode="none")
-    assert (
-        cast(LexicalCandidateRetriever, standard_flow.retriever).domain_filter_mode
-        == "none"
-    )
+    default_flow = create_decision_flow()
+    default_resolver = cast(TargetBindingDecisionResolver, default_flow.resolver)
+    default_retriever = cast(LexicalCandidateRetriever, default_flow.retriever)
+    assert default_resolver.confidence_threshold == 0.5
+    assert default_resolver.compound_threshold == 0.5
+    assert default_retriever.domain_filter_mode == "none"
 
-    pruned_flow = create_decision_flow(domain_filter_mode="strict")
-    assert (
-        cast(LexicalCandidateRetriever, pruned_flow.retriever).domain_filter_mode
-        == "strict"
+    custom_flow = create_decision_flow(
+        confidence_threshold=0.8,
+        compound_threshold=0.3,
+        domain_filter_mode="strict",
     )
+    custom_resolver = cast(TargetBindingDecisionResolver, custom_flow.resolver)
+    custom_retriever = cast(LexicalCandidateRetriever, custom_flow.retriever)
+    assert custom_resolver.confidence_threshold == 0.8
+    assert custom_resolver.compound_threshold == 0.3
+    assert custom_retriever.domain_filter_mode == "strict"
 
     boosted_flow = create_decision_flow(domain_filter_mode="boost")
     assert (
@@ -165,49 +162,14 @@ def test_flow_factory_configurations() -> None:
         == "boost"
     )
 
-    exhaustive_flow = create_exhaustive_flow()
+    exhaustive_flow = create_exhaustive_flow(
+        confidence_threshold=0.75,
+        compound_threshold=0.25,
+    )
     assert type(exhaustive_flow.retriever) is ExhaustiveCandidateRetriever
-
-
-def test_create_flow_from_options_default() -> None:
-    """Test create_flow_from_options uses default stages and thresholds."""
-    flow = create_flow_from_options({})
-    resolver = cast(TargetBindingDecisionResolver, flow.resolver)
-    retriever = cast(LexicalCandidateRetriever, flow.retriever)
-    assert resolver.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
-    assert resolver.compound_threshold == DEFAULT_COMPOUND_THRESHOLD
-    assert retriever.domain_filter_mode == "none"
-
-
-def test_create_flow_from_options_custom_parameters() -> None:
-    """Test create_flow_from_options passes custom filter mode and thresholds."""
-    flow = create_flow_from_options(
-        {
-            CONF_CONFIDENCE_THRESHOLD: 0.85,
-            CONF_COMPOUND_THRESHOLD: 0.45,
-            CONF_DOMAIN_FILTER_MODE: "boost",
-        }
-    )
-    resolver = cast(TargetBindingDecisionResolver, flow.resolver)
-    retriever = cast(LexicalCandidateRetriever, flow.retriever)
-    assert resolver.confidence_threshold == 0.85
-    assert resolver.compound_threshold == 0.45
-    assert retriever.domain_filter_mode == "boost"
-
-
-def test_create_flow_from_options_exhaustive() -> None:
-    """Test create_flow_from_options selects exhaustive candidate retriever."""
-    flow = create_flow_from_options(
-        {
-            CONF_RETRIEVER_TYPE: "exhaustive",
-            CONF_CONFIDENCE_THRESHOLD: 0.9,
-            CONF_COMPOUND_THRESHOLD: 0.2,
-        }
-    )
-    resolver = cast(TargetBindingDecisionResolver, flow.resolver)
-    assert resolver.confidence_threshold == 0.9
-    assert resolver.compound_threshold == 0.2
-    assert flow.retriever.__class__.__name__ == "ExhaustiveCandidateRetriever"
+    ex_resolver = cast(TargetBindingDecisionResolver, exhaustive_flow.resolver)
+    assert ex_resolver.confidence_threshold == 0.75
+    assert ex_resolver.compound_threshold == 0.25
 
 
 async def test_flow_compound_and_low_confidence_escalation(
