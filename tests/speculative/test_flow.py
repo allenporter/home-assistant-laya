@@ -32,7 +32,10 @@ from custom_components.laya.speculative.request.simple import SimpleRequestProce
 from custom_components.laya.speculative.request.tokenizing import (
     TokenizingRequestProcessor,
 )
-from custom_components.laya.speculative.resolution.simple import SimpleDecisionResolver
+from custom_components.laya.speculative.resolution.simple import (
+    SimpleDecisionResolver,
+)
+
 from custom_components.laya.speculative.resolution.target_binding import (
     TargetBindingDecisionResolver,
 )
@@ -45,7 +48,10 @@ from custom_components.laya.speculative.retrieval.lexical import (
 )
 from custom_components.laya.speculative.scoring.scorer import EngineScorer
 from custom_components.laya.speculative.testing.engine import FakeDecisionEngine
-from tests.common.fixture_loader import load_synthetic_home_fixtures
+from tests.common.fixture_loader import (
+    load_synthetic_home_fixtures,
+    register_standard_intents,
+)
 
 
 class FailingDecisionEngine(FakeDecisionEngine):
@@ -75,6 +81,7 @@ def context_fixture(hass: HomeAssistant) -> DecisionContext:
     hass.states.async_set(
         "light.kitchen_light", "off", {"friendly_name": "Kitchen Light"}
     )
+    register_standard_intents(hass)
 
     return DecisionContext(
         hass=hass,
@@ -202,7 +209,6 @@ async def test_flow_compound_and_low_confidence_escalation(
             "is_compound": NoulAnswer(noul=0.8),
         }
     )
-
     compound_dec = await flow.async_run(
         text="Turn on light and play music",
         context=context,
@@ -292,7 +298,11 @@ async def test_farmhouse_decision_routing(
     assert not decision.is_compound
     assert decision.intent_name == "HassTurnOn"
     assert decision.confidence == 0.96
-    assert decision.slots == {"entity_id": "light.kitchen_light"}
+    assert decision.slots == {
+        "entity_id": "light.kitchen_light",
+        "domain": "light",
+        "preferred_area_id": "kitchen",
+    }
 
 
 async def test_simple_flow_end_to_end(

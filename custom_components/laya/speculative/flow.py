@@ -1,3 +1,5 @@
+"""DecisionFlow pipeline orchestrator coordinating the 5 decision stages."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
