@@ -93,13 +93,19 @@ def engine_fixture() -> FakeDecisionEngine:
     )
 
 
+@pytest.fixture(name="synthetic_flow")
+def synthetic_flow_fixture() -> DecisionFlow:
+    """Fixture providing a synthetic DecisionFlow for tests."""
+    return create_decision_flow(confidence_threshold=0.5, compound_threshold=0.5)
+
+
 async def test_flow_runs_all_five_stages(
-    context: DecisionContext, engine: FakeDecisionEngine
+    context: DecisionContext,
+    engine: FakeDecisionEngine,
+    synthetic_flow: DecisionFlow,
 ) -> None:
     """Test standard DecisionFlow pipeline end-to-end."""
-    flow = create_decision_flow()
-
-    decision = await flow.async_run(
+    decision = await synthetic_flow.async_run(
         text="Turn on the kitchen light to 50%",
         context=context,
         engine=engine,
@@ -138,13 +144,6 @@ async def test_flow_custom_stage_injection(
 
 def test_flow_factory_configurations() -> None:
     """Test creating decision flows with various configurations."""
-    default_flow = create_decision_flow()
-    default_resolver = cast(TargetBindingDecisionResolver, default_flow.resolver)
-    default_retriever = cast(LexicalCandidateRetriever, default_flow.retriever)
-    assert default_resolver.confidence_threshold == 0.5
-    assert default_resolver.compound_threshold == 0.5
-    assert default_retriever.domain_filter_mode == "none"
-
     custom_flow = create_decision_flow(
         confidence_threshold=0.8,
         compound_threshold=0.3,
@@ -156,7 +155,11 @@ def test_flow_factory_configurations() -> None:
     assert custom_resolver.compound_threshold == 0.3
     assert custom_retriever.domain_filter_mode == "strict"
 
-    boosted_flow = create_decision_flow(domain_filter_mode="boost")
+    boosted_flow = create_decision_flow(
+        confidence_threshold=0.5,
+        compound_threshold=0.5,
+        domain_filter_mode="boost",
+    )
     assert (
         cast(LexicalCandidateRetriever, boosted_flow.retriever).domain_filter_mode
         == "boost"
@@ -211,9 +214,9 @@ async def test_flow_compound_and_low_confidence_escalation(
 
 async def test_flow_continuous_slots_extraction(
     context: DecisionContext,
+    synthetic_flow: DecisionFlow,
 ) -> None:
     """Test continuous slots extraction for brightness and temperature."""
-    flow = create_decision_flow()
     engine = FakeDecisionEngine(
         default_answers={
             "intent": ChoiceAnswer(choice="HassClimateSetTemperature", confidence=0.95),
@@ -221,7 +224,7 @@ async def test_flow_continuous_slots_extraction(
         }
     )
 
-    decision = await flow.async_run(
+    decision = await synthetic_flow.async_run(
         text="Set thermostat to 72.5 deg and lights to 80%",
         context=context,
         engine=engine,
@@ -232,12 +235,12 @@ async def test_flow_continuous_slots_extraction(
 
 async def test_flow_engine_prediction_exception(
     context: DecisionContext,
+    synthetic_flow: DecisionFlow,
 ) -> None:
     """Test that an unhandled engine exception escalates gracefully."""
-    flow = create_decision_flow()
     failing_engine = FailingDecisionEngine()
 
-    decision = await flow.async_run(
+    decision = await synthetic_flow.async_run(
         text="Turn on the light",
         context=context,
         engine=failing_engine,
@@ -246,10 +249,12 @@ async def test_flow_engine_prediction_exception(
     assert "API connection timeout" in (decision.escalation_reason or "")
 
 
-async def test_farmhouse_decision_routing(hass: HomeAssistant) -> None:
+async def test_farmhouse_decision_routing(
+    hass: HomeAssistant,
+    synthetic_flow: DecisionFlow,
+) -> None:
     """Test end-to-end decision routing with FakeDecisionEngine on a farmhouse utterance."""
     farmhouse_context = load_synthetic_home_fixtures(hass)
-    flow = create_decision_flow()
 
     engine = FakeDecisionEngine(
         default_answers={
@@ -262,7 +267,7 @@ async def test_farmhouse_decision_routing(hass: HomeAssistant) -> None:
         }
     )
 
-    decision = await flow.async_run(
+    decision = await synthetic_flow.async_run(
         text="Turn on the Kitchen Light",
         context=farmhouse_context,
         engine=engine,

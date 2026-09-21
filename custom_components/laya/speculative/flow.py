@@ -77,8 +77,8 @@ class DecisionFlow:
 
 
 def create_decision_flow(
-    confidence_threshold: float = 0.5,
-    compound_threshold: float = 0.5,
+    confidence_threshold: float,
+    compound_threshold: float,
     domain_filter_mode: Literal["none", "strict", "boost"] = "none",
 ) -> DecisionFlow:
     """Create a standard DecisionFlow."""
@@ -95,8 +95,8 @@ def create_decision_flow(
 
 
 def create_exhaustive_flow(
-    confidence_threshold: float = 0.5,
-    compound_threshold: float = 0.5,
+    confidence_threshold: float,
+    compound_threshold: float,
 ) -> DecisionFlow:
     """Create a DecisionFlow that evaluates all controllable candidates without filtering."""
     return DecisionFlow(
@@ -112,7 +112,7 @@ def create_exhaustive_flow(
 
 
 def create_simple_flow(
-    confidence_threshold: float = 0.5,
+    confidence_threshold: float,
 ) -> DecisionFlow:
     """Create a minimal, unconstrained pass-through decision flow."""
     return DecisionFlow(
