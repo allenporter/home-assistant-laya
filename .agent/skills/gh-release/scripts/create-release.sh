@@ -38,9 +38,13 @@ fi
 MANIFEST_PATH=$MANIFEST_FILES
 
 # Using python to update the json file to avoid issues with sed
-python -c "import json; data = json.load(open('$MANIFEST_PATH')); data['version'] = '$VERSION'; json.dump(data, open('$MANIFEST_PATH', 'w'), indent=2)"
+python -c "import json; data = json.load(open('$MANIFEST_PATH')); data['version'] = '$VERSION'; open('$MANIFEST_PATH', 'w').write(json.dumps(data, indent=2) + '\n')"
 
 git add "$MANIFEST_PATH"
-git commit -m "chore(release): $VERSION"
+# Use git commit with pre-commit handling
+git commit -m "chore(release): $VERSION" || {
+  git add "$MANIFEST_PATH"
+  git commit -m "chore(release): $VERSION"
+}
 git push
 gh release create "$VERSION" --generate-notes
