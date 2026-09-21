@@ -23,8 +23,8 @@ if ! command -v gh &> /dev/null; then
     exit 1
 fi
 
-MANIFEST_FILES=$(find . -name "manifest.json")
-NUM_FILES=$(echo "$MANIFEST_FILES" | wc -l)
+MANIFEST_FILES=$(find . -not -path '*/.*/*' -name "manifest.json")
+NUM_FILES=$(echo "$MANIFEST_FILES" | grep -v '^$' | wc -l)
 
 if [ "$NUM_FILES" -eq 0 ]; then
     echo "Error: No manifest.json found."
