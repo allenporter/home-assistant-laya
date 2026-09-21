@@ -4,7 +4,6 @@ DOMAIN = "laya"
 
 # Configuration keys
 CONF_DEVICE = "device"
-CONF_STRATEGY = "strategy"
 CONF_FALLBACK_AGENT = "fallback_agent"
 CONF_COMPOUND_THRESHOLD = "compound_threshold"
 CONF_CONFIDENCE_THRESHOLD = "confidence_threshold"

@@ -15,9 +15,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.laya.speculative.context import DecisionContext
 from custom_components.laya.speculative.flow import (
     DecisionFlow,
+    FlowConfig,
     create_decision_flow,
-    create_exhaustive_flow,
-    create_simple_flow,
+)
+from custom_components.laya.speculative.hydration.simple import (
+    SimpleCandidateHydrator,
 )
 from custom_components.laya.speculative.hydration.hierarchical import (
     HierarchicalCandidateHydrator,
@@ -26,9 +28,11 @@ from custom_components.laya.speculative.models import (
     ChoiceAnswer,
     NoulAnswer,
 )
+from custom_components.laya.speculative.request.simple import SimpleRequestProcessor
 from custom_components.laya.speculative.request.tokenizing import (
     TokenizingRequestProcessor,
 )
+from custom_components.laya.speculative.resolution.simple import SimpleDecisionResolver
 from custom_components.laya.speculative.resolution.target_binding import (
     TargetBindingDecisionResolver,
 )
@@ -96,7 +100,9 @@ def engine_fixture() -> FakeDecisionEngine:
 @pytest.fixture(name="synthetic_flow")
 def synthetic_flow_fixture() -> DecisionFlow:
     """Fixture providing a synthetic DecisionFlow for tests."""
-    return create_decision_flow(confidence_threshold=0.5, compound_threshold=0.5)
+    return create_decision_flow(
+        FlowConfig(confidence_threshold=0.5, compound_threshold=0.5)
+    )
 
 
 async def test_flow_runs_all_five_stages(
@@ -145,9 +151,11 @@ async def test_flow_custom_stage_injection(
 def test_flow_factory_configurations() -> None:
     """Test creating decision flows with various configurations."""
     custom_flow = create_decision_flow(
-        confidence_threshold=0.8,
-        compound_threshold=0.3,
-        domain_filter_mode="strict",
+        FlowConfig(
+            confidence_threshold=0.8,
+            compound_threshold=0.3,
+            domain_filter_mode="strict",
+        )
     )
     custom_resolver = cast(TargetBindingDecisionResolver, custom_flow.resolver)
     custom_retriever = cast(LexicalCandidateRetriever, custom_flow.retriever)
@@ -156,18 +164,23 @@ def test_flow_factory_configurations() -> None:
     assert custom_retriever.domain_filter_mode == "strict"
 
     boosted_flow = create_decision_flow(
-        confidence_threshold=0.5,
-        compound_threshold=0.5,
-        domain_filter_mode="boost",
+        FlowConfig(
+            confidence_threshold=0.5,
+            compound_threshold=0.5,
+            domain_filter_mode="boost",
+        )
     )
     assert (
         cast(LexicalCandidateRetriever, boosted_flow.retriever).domain_filter_mode
         == "boost"
     )
 
-    exhaustive_flow = create_exhaustive_flow(
-        confidence_threshold=0.75,
-        compound_threshold=0.25,
+    exhaustive_flow = create_decision_flow(
+        FlowConfig(
+            confidence_threshold=0.75,
+            compound_threshold=0.25,
+            retriever_type="exhaustive",
+        )
     )
     assert type(exhaustive_flow.retriever) is ExhaustiveCandidateRetriever
     ex_resolver = cast(TargetBindingDecisionResolver, exhaustive_flow.resolver)
@@ -179,7 +192,9 @@ async def test_flow_compound_and_low_confidence_escalation(
     context: DecisionContext,
 ) -> None:
     """Test compound command escalation and low confidence handling in flow."""
-    flow = create_decision_flow(confidence_threshold=0.8, compound_threshold=0.5)
+    flow = create_decision_flow(
+        FlowConfig(confidence_threshold=0.8, compound_threshold=0.5)
+    )
 
     compound_engine = FakeDecisionEngine(
         default_answers={
@@ -283,8 +298,14 @@ async def test_farmhouse_decision_routing(
 async def test_simple_flow_end_to_end(
     context: DecisionContext,
 ) -> None:
-    """Test create_simple_flow runs simple pass-through stages end-to-end."""
-    flow = create_simple_flow(confidence_threshold=0.8)
+    """Test DecisionFlow configured with simple pass-through stages end-to-end."""
+    flow = DecisionFlow(
+        processor=SimpleRequestProcessor(),
+        retriever=ExhaustiveCandidateRetriever(controllable_only=False),
+        hydrator=SimpleCandidateHydrator(),
+        scorer=EngineScorer(),
+        resolver=SimpleDecisionResolver(confidence_threshold=0.8),
+    )
     engine = FakeDecisionEngine(
         default_answers={
             "intent": ChoiceAnswer(choice="HassTurnOn", confidence=0.92),

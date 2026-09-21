@@ -28,8 +28,8 @@ from .engine import LocalLayaEngine
 from .models import LayaConfigEntry, LayaData
 from .speculative.flow import (
     DecisionFlow,
+    FlowConfig,
     create_decision_flow,
-    create_exhaustive_flow,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,28 +39,19 @@ PLATFORMS: tuple[Platform, ...] = (Platform.CONVERSATION,)
 
 def create_flow_from_options(options: Mapping[str, Any]) -> DecisionFlow:
     """Create a DecisionFlow configured from config entry options."""
-    retriever_type = options.get(CONF_RETRIEVER_TYPE, DEFAULT_RETRIEVER_TYPE)
-    confidence_threshold = float(
-        options.get(CONF_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD)
+    config = FlowConfig(
+        confidence_threshold=float(
+            options.get(CONF_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD)
+        ),
+        compound_threshold=float(
+            options.get(CONF_COMPOUND_THRESHOLD, DEFAULT_COMPOUND_THRESHOLD)
+        ),
+        retriever_type=options.get(CONF_RETRIEVER_TYPE, DEFAULT_RETRIEVER_TYPE),
+        domain_filter_mode=options.get(
+            CONF_DOMAIN_FILTER_MODE, DEFAULT_DOMAIN_FILTER_MODE
+        ),
     )
-    compound_threshold = float(
-        options.get(CONF_COMPOUND_THRESHOLD, DEFAULT_COMPOUND_THRESHOLD)
-    )
-
-    if retriever_type == "exhaustive":
-        return create_exhaustive_flow(
-            confidence_threshold=confidence_threshold,
-            compound_threshold=compound_threshold,
-        )
-
-    domain_filter_mode = options.get(
-        CONF_DOMAIN_FILTER_MODE, DEFAULT_DOMAIN_FILTER_MODE
-    )
-    return create_decision_flow(
-        confidence_threshold=confidence_threshold,
-        compound_threshold=compound_threshold,
-        domain_filter_mode=domain_filter_mode,
-    )
+    return create_decision_flow(config)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: LayaConfigEntry) -> bool:

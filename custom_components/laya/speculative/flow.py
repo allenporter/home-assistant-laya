@@ -1,7 +1,6 @@
-"""DecisionFlow pipeline orchestrator coordinating the 5 decision stages."""
-
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from typing import Literal
 
@@ -9,13 +8,10 @@ from .context import DecisionContext
 from .hydration.base import CandidateHydrator
 from .hydration.hierarchical import HierarchicalCandidateHydrator
 from .hydration.models import HydratedPayload
-from .hydration.simple import SimpleCandidateHydrator
 from .request.base import RequestProcessor
-from .request.simple import SimpleRequestProcessor
 from .request.tokenizing import TokenizingRequestProcessor
 from .resolution.base import DecisionResolver
 from .resolution.models import Decision
-from .resolution.simple import SimpleDecisionResolver
 from .resolution.target_binding import TargetBindingDecisionResolver
 
 from .retrieval.base import CandidateRetriever
@@ -76,49 +72,33 @@ class DecisionFlow:
         return self.resolver.resolve(prediction, parsed_request, candidates)
 
 
-def create_decision_flow(
-    confidence_threshold: float,
-    compound_threshold: float,
-    domain_filter_mode: Literal["none", "strict", "boost"] = "none",
-) -> DecisionFlow:
-    """Create a standard DecisionFlow."""
+@dataclass(frozen=True, slots=True)
+class FlowConfig:
+    """Configuration options for constructing a DecisionFlow."""
+
+    confidence_threshold: float
+    compound_threshold: float
+    retriever_type: Literal["lexical", "exhaustive"] = "lexical"
+    domain_filter_mode: Literal["none", "strict", "boost"] = "none"
+
+
+def create_decision_flow(config: FlowConfig) -> DecisionFlow:
+    """Create a configured DecisionFlow."""
+    retriever: CandidateRetriever
+    if config.retriever_type == "exhaustive":
+        retriever = ExhaustiveCandidateRetriever()
+    else:
+        retriever = LexicalCandidateRetriever(
+            domain_filter_mode=config.domain_filter_mode
+        )
+
     return DecisionFlow(
         processor=TokenizingRequestProcessor(),
-        retriever=LexicalCandidateRetriever(domain_filter_mode=domain_filter_mode),
+        retriever=retriever,
         hydrator=HierarchicalCandidateHydrator(),
         scorer=EngineScorer(),
         resolver=TargetBindingDecisionResolver(
-            confidence_threshold=confidence_threshold,
-            compound_threshold=compound_threshold,
+            confidence_threshold=config.confidence_threshold,
+            compound_threshold=config.compound_threshold,
         ),
-    )
-
-
-def create_exhaustive_flow(
-    confidence_threshold: float,
-    compound_threshold: float,
-) -> DecisionFlow:
-    """Create a DecisionFlow that evaluates all controllable candidates without filtering."""
-    return DecisionFlow(
-        processor=TokenizingRequestProcessor(),
-        retriever=ExhaustiveCandidateRetriever(),
-        hydrator=HierarchicalCandidateHydrator(),
-        scorer=EngineScorer(),
-        resolver=TargetBindingDecisionResolver(
-            confidence_threshold=confidence_threshold,
-            compound_threshold=compound_threshold,
-        ),
-    )
-
-
-def create_simple_flow(
-    confidence_threshold: float,
-) -> DecisionFlow:
-    """Create a minimal, unconstrained pass-through decision flow."""
-    return DecisionFlow(
-        processor=SimpleRequestProcessor(),
-        retriever=ExhaustiveCandidateRetriever(controllable_only=False),
-        hydrator=SimpleCandidateHydrator(),
-        scorer=EngineScorer(),
-        resolver=SimpleDecisionResolver(confidence_threshold=confidence_threshold),
     )

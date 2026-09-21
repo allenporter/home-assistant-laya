@@ -20,6 +20,7 @@ from custom_components.laya.const import (
 from custom_components.laya.engine import LocalLayaEngine
 from custom_components.laya.speculative.flow import (
     DecisionFlow,
+    FlowConfig,
     create_decision_flow,
 )
 from custom_components.laya.speculative.scoring.engine import DecisionEngine
@@ -43,30 +44,26 @@ def require_laya_model_fixture() -> None:
         )
 
 
-@pytest.fixture(name="laya_flow")
-def laya_flow_fixture() -> DecisionFlow:
+@pytest.fixture(name="flow")
+def flow_fixture() -> DecisionFlow:
     """Fixture providing a default DecisionFlow for Laya."""
     return create_decision_flow(
-        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+        FlowConfig(
+            confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+            compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+        )
     )
-
-
-@pytest.fixture(name="flow")
-def flow_alias_fixture(
-    laya_flow: DecisionFlow,
-) -> DecisionFlow:
-    """Alias for laya_flow fixture."""
-    return laya_flow
 
 
 @pytest.fixture(name="flow_standard")
 def flow_standard_fixture() -> DecisionFlow:
     """Fixture providing an unpruned DecisionFlow."""
     return create_decision_flow(
-        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
-        domain_filter_mode="none",
+        FlowConfig(
+            confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+            compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+            domain_filter_mode="none",
+        )
     )
 
 
@@ -74,9 +71,11 @@ def flow_standard_fixture() -> DecisionFlow:
 def flow_pruned_fixture() -> DecisionFlow:
     """Fixture providing an IntentPruned DecisionFlow."""
     return create_decision_flow(
-        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
-        domain_filter_mode="strict",
+        FlowConfig(
+            confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+            compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+            domain_filter_mode="strict",
+        )
     )
 
 
@@ -84,9 +83,11 @@ def flow_pruned_fixture() -> DecisionFlow:
 def flow_boosted_fixture() -> DecisionFlow:
     """Fixture providing a DomainBoosted DecisionFlow."""
     return create_decision_flow(
-        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
-        domain_filter_mode="boost",
+        FlowConfig(
+            confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+            compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+            domain_filter_mode="boost",
+        )
     )
 
 
@@ -96,8 +97,8 @@ def mock_laya_engine_fixture() -> DecisionEngine:
     return FakeDecisionEngine()
 
 
-@pytest.fixture(scope="module", name="live_laya_engine")
-async def live_laya_engine_fixture(
+@pytest.fixture(scope="module", name="live_engine")
+async def live_engine_fixture(
     require_laya_model: None,
 ) -> AsyncGenerator[LocalLayaEngine, None]:
     """Provide a warm LocalLayaEngine instance across test cases in the module.
@@ -110,11 +111,3 @@ async def live_laya_engine_fixture(
         yield engine
     finally:
         await engine.async_unload(force=True)
-
-
-@pytest.fixture(name="live_engine")
-def live_engine_alias_fixture(
-    live_laya_engine: LocalLayaEngine,
-) -> LocalLayaEngine:
-    """Alias for live_laya_engine fixture."""
-    return live_laya_engine
