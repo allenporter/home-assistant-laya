@@ -18,12 +18,16 @@ from .const import (
     CONF_COMPOUND_THRESHOLD,
     CONF_CONFIDENCE_THRESHOLD,
     CONF_DEVICE,
+    CONF_DOMAIN_FILTER_MODE,
     CONF_FALLBACK_AGENT,
     CONF_IDLE_TIMEOUT,
+    CONF_RETRIEVER_TYPE,
     DEFAULT_COMPOUND_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_DEVICE,
+    DEFAULT_DOMAIN_FILTER_MODE,
     DEFAULT_IDLE_TIMEOUT,
+    DEFAULT_RETRIEVER_TYPE,
     DOMAIN,
 )
 
@@ -112,6 +116,30 @@ class LayaOptionsFlowHandler(OptionsFlow):
                         step=30,
                         unit_of_measurement="seconds",
                         mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_RETRIEVER_TYPE,
+                    default=self.config_entry.options.get(
+                        CONF_RETRIEVER_TYPE, DEFAULT_RETRIEVER_TYPE
+                    ),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["lexical", "exhaustive"],
+                        translation_key="retriever_type",
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_DOMAIN_FILTER_MODE,
+                    default=self.config_entry.options.get(
+                        CONF_DOMAIN_FILTER_MODE, DEFAULT_DOMAIN_FILTER_MODE
+                    ),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["none", "strict", "boost"],
+                        translation_key="domain_filter_mode",
+                        mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
                 vol.Optional(

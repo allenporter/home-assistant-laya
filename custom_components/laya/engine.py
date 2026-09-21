@@ -12,7 +12,7 @@ from typing_extensions import override
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
 
-from .speculative.engine import DecisionEngine, PredictionResult
+from .speculative.scoring.engine import DecisionEngine, PredictionResult
 from .speculative.models import (
     Answer,
     ChoiceAnswer,

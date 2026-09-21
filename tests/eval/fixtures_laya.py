@@ -13,13 +13,17 @@ from huggingface_hub import snapshot_download
 import huggingface_hub.constants as hf_constants
 import pytest
 
-from custom_components.laya.engine import LocalLayaEngine
-from custom_components.laya.speculative import (
-    DecisionEngine,
-    DecisionStrategy,
-    SpeculativeFanOutStrategy,
+from custom_components.laya.const import (
+    DEFAULT_COMPOUND_THRESHOLD,
+    DEFAULT_CONFIDENCE_THRESHOLD,
 )
-from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
+from custom_components.laya.engine import LocalLayaEngine
+from custom_components.laya.speculative.flow import (
+    DecisionFlow,
+    create_decision_flow,
+)
+from custom_components.laya.speculative.scoring.engine import DecisionEngine
+from custom_components.laya.speculative.testing.engine import FakeDecisionEngine
 
 
 @pytest.fixture(scope="session", name="require_laya_model")
@@ -39,23 +43,56 @@ def require_laya_model_fixture() -> None:
         )
 
 
-@pytest.fixture(name="laya_strategy")
-def laya_strategy_fixture() -> SpeculativeFanOutStrategy:
-    """Fixture providing a default SpeculativeFanOutStrategy for Laya."""
-    return SpeculativeFanOutStrategy()
+@pytest.fixture(name="laya_flow")
+def laya_flow_fixture() -> DecisionFlow:
+    """Fixture providing a default DecisionFlow for Laya."""
+    return create_decision_flow(
+        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+    )
 
 
-@pytest.fixture(name="strategy")
-def strategy_alias_fixture(
-    laya_strategy: SpeculativeFanOutStrategy,
-) -> DecisionStrategy:
-    """Alias for laya_strategy fixture."""
-    return laya_strategy
+@pytest.fixture(name="flow")
+def flow_alias_fixture(
+    laya_flow: DecisionFlow,
+) -> DecisionFlow:
+    """Alias for laya_flow fixture."""
+    return laya_flow
+
+
+@pytest.fixture(name="flow_standard")
+def flow_standard_fixture() -> DecisionFlow:
+    """Fixture providing an unpruned DecisionFlow."""
+    return create_decision_flow(
+        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+        domain_filter_mode="none",
+    )
+
+
+@pytest.fixture(name="flow_pruned")
+def flow_pruned_fixture() -> DecisionFlow:
+    """Fixture providing an IntentPruned DecisionFlow."""
+    return create_decision_flow(
+        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+        domain_filter_mode="strict",
+    )
+
+
+@pytest.fixture(name="flow_boosted")
+def flow_boosted_fixture() -> DecisionFlow:
+    """Fixture providing a DomainBoosted DecisionFlow."""
+    return create_decision_flow(
+        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
+        compound_threshold=DEFAULT_COMPOUND_THRESHOLD,
+        domain_filter_mode="boost",
+    )
 
 
 @pytest.fixture(name="mock_laya_engine")
 def mock_laya_engine_fixture() -> DecisionEngine:
-    """Fixture providing a mock DecisionEngine for strategy testing."""
+    """Fixture providing a mock DecisionEngine for flow testing."""
     return FakeDecisionEngine()
 
 

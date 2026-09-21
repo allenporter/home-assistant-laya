@@ -19,8 +19,25 @@
           "compound_threshold": "Compound Utterance Threshold (P > threshold triggers System 2)",
           "confidence_threshold": "Minimum Confidence Threshold",
           "idle_timeout": "Idle Timeout (seconds, 0 to always unload immediately)",
+          "retriever_type": "Candidate Retriever",
+          "domain_filter_mode": "Domain Filter Mode",
           "fallback_agent": "System 2 Fallback Conversation Agent"
         }
+      }
+    }
+  },
+  "selector": {
+    "retriever_type": {
+      "options": {
+        "lexical": "Lexical",
+        "exhaustive": "Exhaustive"
+      }
+    },
+    "domain_filter_mode": {
+      "options": {
+        "none": "None",
+        "strict": "Strict",
+        "boost": "Boost"
       }
     }
   }

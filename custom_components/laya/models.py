@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
 
-from .speculative import DecisionEngine, DecisionStrategy
+from .speculative.flow import DecisionFlow
+from .speculative.scoring.engine import DecisionEngine
 
 type LayaConfigEntry = ConfigEntry[LayaData]
 
@@ -16,4 +17,4 @@ class LayaData:
     """Runtime data stored in ConfigEntry."""
 
     engine: DecisionEngine
-    strategy: DecisionStrategy
+    flow: DecisionFlow

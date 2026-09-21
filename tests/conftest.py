@@ -20,7 +20,7 @@ from custom_components.laya.engine import (
     LocalLayaEngine,
     async_unload_all_models,
 )
-from custom_components.laya.speculative.inmemory.engine import FakeDecisionEngine
+from custom_components.laya.speculative.testing.engine import FakeDecisionEngine
 
 _LOGGER = logging.getLogger(__name__)
 
