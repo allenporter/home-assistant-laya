@@ -104,7 +104,7 @@ def test_create_flow_from_options_default() -> None:
     retriever = cast(LexicalCandidateRetriever, flow.retriever)
     assert resolver.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
     assert resolver.compound_threshold == DEFAULT_COMPOUND_THRESHOLD
-    assert retriever.domain_filter_mode == "none"
+    assert retriever.domain_filter_mode == "boost"
 
 
 def test_create_flow_from_options_custom_parameters() -> None:

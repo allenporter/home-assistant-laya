@@ -101,8 +101,8 @@ Configure Laya in the Home Assistant UI or programmatically via config entry opt
 | :--------------------- | :------ | :------- | :------------------------------------------------------------------------------------------------- |
 | `device`               | `str`   | `"auto"` | Hardware device: `"auto"`, `"cuda"`, `"mps"`, or `"cpu"`.                                          |
 | `idle_timeout`         | `float` | `0.0`    | Seconds to hold model weights in RAM after a query (`0.0` unloads immediately to free ~1.2GB RAM). |
-| `confidence_threshold` | `float` | `0.30`   | Minimum calibrated confidence ($\frac{N \cdot p_{\max} - 1}{N - 1}$) required to execute directly. |
-| `compound_threshold`   | `float` | `0.65`   | Probability threshold where requests are treated as multi-step commands and escalated.             |
+| `confidence_threshold` | `float` | `0.40`   | Minimum calibrated confidence ($\frac{N \cdot p_{\max} - 1}{N - 1}$) required to execute directly. |
+| `compound_threshold`   | `float` | `0.70`   | Probability threshold where requests are treated as multi-step commands and escalated.             |
 | `fallback_agent`       | `str`   | `None`   | Conversation agent entity ID for fallback (e.g., `"conversation.home_assistant"`).                 |
 
 ## Contributing

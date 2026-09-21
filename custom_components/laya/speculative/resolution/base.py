@@ -9,8 +9,8 @@ from ..retrieval.models import RetrievedCandidates
 from ..scoring.engine import PredictionResult
 from .models import Decision
 
-DEFAULT_CONFIDENCE_THRESHOLD: float = 0.50
-DEFAULT_COMPOUND_THRESHOLD: float = 0.50
+DEFAULT_CONFIDENCE_THRESHOLD: float = 0.40
+DEFAULT_COMPOUND_THRESHOLD: float = 0.70
 
 
 class DecisionResolver(ABC):
