@@ -12,4 +12,4 @@ syrupy>=4.6.1
 # Component dependencies
 hassil>=2.0.4
 home-assistant-intents>=2024.4.3
-laya==0.3.4
+laya==0.3.5
