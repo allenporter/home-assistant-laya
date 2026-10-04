@@ -2,7 +2,7 @@
 pip==26.2.1
 pre-commit==4.6.2
 ruff==0.8.1
-ty==0.0.14
+ty==0.0.84
 
 
 # Home Assistant testing dependencies
